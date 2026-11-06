@@ -1,0 +1,39 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+.venv/
+venv/
+myenv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local database and runtime logs
+data/*.db
+data/*.sqlite*
+logs/*
+!logs/.gitkeep
+
+# Generated projects and media
+projects/
+outputs/
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
