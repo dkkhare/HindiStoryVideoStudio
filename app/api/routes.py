@@ -20,7 +20,8 @@ from app.models import (
 from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGenerateRequest
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
-from app.services.project_files import create_project_workspace\nfrom app.services.tts import VoiceboxTTSProvider
+from app.services.project_files import create_project_workspace
+from app.services.tts import VoiceboxTTSProvider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
