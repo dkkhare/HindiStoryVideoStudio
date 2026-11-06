@@ -248,9 +248,17 @@ class ImageGenerationService:
         if output_path.exists() and not force_refresh:
             existing = self.read_json(output_path)
 
-            if isinstance(existing, dict) and isinstance(existing.get("asset_states"), list):
-                logger.info("Using existing asset bible with state continuity data")
-                return existing
+            if (
+                isinstance(existing, dict)
+                and isinstance(existing.get("asset_states"), list)
+                and len(existing["asset_states"]) == len(screenplay.get("scenes", []))
+            ):
+                try:
+                    self.validate_asset_bible(existing, screenplay)
+                    logger.info("Using existing asset bible with valid state continuity data")
+                    return existing
+                except (TypeError, ValueError, KeyError):
+                    logger.warning("Existing asset bible has incomplete continuity data; regenerating")
 
         screenplay_summary = {
             "title": screenplay.get("title"),
