@@ -153,6 +153,8 @@ async function renderProject(project) {
 
         if (screenplay.status === "completed") {
 
+            await renderAudioStage(workflow, project, audio);
+
             if (!references || references.status === "pending" ||
                 references.status === "failed") {
 
