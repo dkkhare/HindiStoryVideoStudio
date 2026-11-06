@@ -1,6 +1,7 @@
 
 import json
 import logging
+import wave
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -470,7 +471,7 @@ def _combine_scene_wavs(input_paths: list[Path], output_path: Path) -> bool:
                     return False
                 frames.append(source.readframes(source.getnframes()))
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        silence = b"\\x00" * int(params.nchannels * params.sampwidth * params.framerate * 0.25)
+        silence = bytes(int(params.nchannels * params.sampwidth * params.framerate * 0.25))
         with wave.open(str(output_path), "wb") as target:
             target.setparams(params)
             for index, chunk in enumerate(frames):
