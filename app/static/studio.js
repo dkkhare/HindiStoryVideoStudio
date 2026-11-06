@@ -73,7 +73,8 @@ async function renderProject(project) {
 
         const screenplay = status.screenplay;
         const references = status.character_bible;
-        const scenes = status.scene_images;\n        const audio = status.audio;
+        const scenes = status.scene_images;
+        const audio = status.audio;
 
         if (!screenplay || screenplay.status === "pending" ||
             screenplay.status === "failed") {
