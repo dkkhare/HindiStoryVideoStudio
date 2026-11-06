@@ -16,10 +16,10 @@ from app.models import (
     ProductionStage,
     StageStatus,
 )
-from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse
+from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGenerateRequest
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
-from app.services.project_files import create_project_workspace
+from app.services.project_files import create_project_workspace\nfrom app.services.tts import VoiceboxTTSProvider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -435,3 +435,190 @@ def get_project_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     return FileResponse(requested_file)
+
+
+
+@router.get("/voicebox/profiles")
+async def list_voicebox_profiles():
+    """Return available local Voicebox voice profiles for the audio-stage selector."""
+    try:
+        return await VoiceboxTTSProvider().list_profiles()
+    except Exception as exc:
+        logger.exception("Could not load Voicebox profiles")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not connect to Voicebox at {settings.voicebox_base_url}: {exc}",
+        ) from exc
+
+
+def _combine_scene_wavs(input_paths: list[Path], output_path: Path) -> bool:
+    """Join compatible PCM WAV segments with a short pause between speakers."""
+    if not input_paths:
+        return False
+    try:
+        with wave.open(str(input_paths[0]), "rb") as first:
+            params = first.getparams()
+            frames = [first.readframes(first.getnframes())]
+        for path in input_paths[1:]:
+            with wave.open(str(path), "rb") as source:
+                if (
+                    source.getnchannels() != params.nchannels
+                    or source.getsampwidth() != params.sampwidth
+                    or source.getframerate() != params.framerate
+                    or source.getcomptype() != params.comptype
+                ):
+                    return False
+                frames.append(source.readframes(source.getnframes()))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        silence = b"\\x00" * int(params.nchannels * params.sampwidth * params.framerate * 0.25)
+        with wave.open(str(output_path), "wb") as target:
+            target.setparams(params)
+            for index, chunk in enumerate(frames):
+                if index:
+                    target.writeframes(silence)
+                target.writeframes(chunk)
+        return True
+    except (wave.Error, OSError):
+        logger.exception("Could not combine scene WAV files: %s", output_path)
+        return False
+
+
+@router.post("/projects/{project_id}/audio/generate")
+async def generate_project_audio(
+    project_id: int,
+    payload: AudioGenerateRequest,
+    db: Session = Depends(get_db),
+):
+    """Generate all screenplay dialogue/narration segments, one at a time."""
+    project = get_project_or_404(project_id, db)
+    if not project.screenplay_json:
+        raise HTTPException(
+            status_code=400,
+            detail="Generate the screenplay before generating audio.",
+        )
+
+    stage = get_stage(project, "audio")
+    if not stage:
+        raise HTTPException(status_code=500, detail="Audio production stage is missing.")
+    if stage.status == StageStatus.running:
+        raise HTTPException(status_code=409, detail="Audio generation is already running.")
+
+    screenplay = json.loads(project.screenplay_json)
+    scenes = screenplay.get("scenes") or []
+    if not scenes:
+        raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
+
+    voicebox = VoiceboxTTSProvider()
+    try:
+        profiles = await voicebox.list_profiles()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}",
+        ) from exc
+
+    profile = next((item for item in profiles if item.get("id") == payload.profile_id), None)
+    if not profile:
+        raise HTTPException(status_code=400, detail="The selected Voicebox voice profile was not found.")
+
+    audio_root = Path(project.project_path) / "audio"
+    audio_root.mkdir(parents=True, exist_ok=True)
+    stage.status = StageStatus.running
+    stage.detail = f"Generating audio with Voicebox profile '{profile.get('name', payload.profile_id)}'..."
+    db.commit()
+
+    manifest = {
+        "provider": "voicebox",
+        "profile_id": payload.profile_id,
+        "profile_name": profile.get("name", payload.profile_id),
+        "engine": payload.engine,
+        "language": VoiceboxTTSProvider.language_code(project.language),
+        "scenes": [],
+    }
+
+    try:
+        for scene_index, scene in enumerate(scenes, start=1):
+            scene_id = str(scene.get("scene_id") or f"SCENE_{scene_index:03d}")
+            safe_scene_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in scene_id)
+            scene_dir = audio_root / safe_scene_id
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            scene_segments = []
+            wav_paths = []
+
+            for segment_index, segment in enumerate(scene.get("dialogue_and_narration") or [], start=1):
+                text_value = str(segment.get("text") or "").strip()
+                if not text_value:
+                    continue
+
+                speaker = str(segment.get("speaker") or "NARRATOR")
+                safe_speaker = "".join(c if c.isalnum() or c in "-_" else "_" for c in speaker)
+                filename = f"segment_{segment_index:03d}_{safe_speaker}.wav"
+                output_path = scene_dir / filename
+
+                audio_bytes = await voicebox.synthesize_bytes(
+                    text=text_value,
+                    profile_id=payload.profile_id,
+                    language=project.language,
+                    engine=payload.engine,
+                )
+                output_path.write_bytes(audio_bytes)
+                wav_paths.append(output_path)
+                scene_segments.append({
+                    "segment_id": segment.get("segment_id") or f"SEG_{segment_index:03d}",
+                    "speaker": speaker,
+                    "kind": segment.get("kind"),
+                    "text": text_value,
+                    "audio": f"audio/{safe_scene_id}/{filename}".replace("\\\\", "/"),
+                })
+
+            combined_name = f"{safe_scene_id}.wav"
+            combined_path = audio_root / combined_name
+            combined_ok = _combine_scene_wavs(wav_paths, combined_path)
+            manifest["scenes"].append({
+                "scene_id": scene_id,
+                "audio": f"audio/{combined_name}" if combined_ok else None,
+                "segments": scene_segments,
+            })
+            stage.detail = (
+                f"Voicebox audio: completed scene {scene_index} of {len(scenes)} "
+                f"({len(scene_segments)} spoken segments)."
+            )
+            db.commit()
+
+        manifest_path = audio_root / "audio_manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        stage.status = StageStatus.completed
+        stage.detail = (
+            f"Audio generated for {len(manifest['scenes'])} scenes using "
+            f"Voicebox profile '{profile.get('name', payload.profile_id)}'."
+        )
+        db.commit()
+        return {
+            "ok": True,
+            "message": stage.detail,
+            "manifest": manifest,
+        }
+
+    except Exception as exc:
+        logger.exception("Project audio generation failed for project %s", project_id)
+        manifest["error"] = str(exc)
+        (audio_root / "audio_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        stage.status = StageStatus.failed
+        stage.detail = f"Audio generation failed: {exc}"
+        db.commit()
+        raise HTTPException(status_code=502, detail=stage.detail) from exc
+
+
+@router.get("/projects/{project_id}/audio")
+def get_project_audio(project_id: int, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    manifest_path = Path(project.project_path) / "audio" / "audio_manifest.json"
+    if not manifest_path.is_file():
+        raise HTTPException(status_code=404, detail="No audio manifest has been generated yet.")
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
