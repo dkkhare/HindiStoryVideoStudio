@@ -199,7 +199,7 @@ PRODUCTION REQUIREMENTS:
 14. Make the screenplay emotionally engaging and appropriate to the story's
     intended audience; do not impose a family or children's audience by default.
 15. Return ONLY valid structured JSON matching the supplied schema.
-""""""
+"""
 
         logger.info(
             "Generating screenplay using model: %s",
