@@ -281,7 +281,7 @@ async def generate_references(
     project_path = Path(project.project_path)
 
     reference_stage.status = StageStatus.running
-    reference_stage.detail = "Generating photorealistic character, prop and location references..."
+    reference_stage.detail = "Generating character, prop and location references..."
     db.commit()
 
     try:
@@ -290,12 +290,12 @@ async def generate_references(
         result = await service.generate_references(
             project_path=project_path,
             screenplay=screenplay,
-            visual_style="Photorealistic live-action cinematic film",
+            visual_style=project.visual_style,
             aspect_ratio=project.aspect_ratio,
         )
 
         reference_stage.status = StageStatus.completed
-        reference_stage.detail = "Photorealistic visual references generated."
+        reference_stage.detail = f"Visual references generated using {project.visual_style}."
         db.commit()
 
         return {
@@ -362,7 +362,7 @@ async def generate_scene_images(
     project_path = Path(project.project_path)
 
     scene_stage.status = StageStatus.running
-    scene_stage.detail = "Generating photorealistic scene images..."
+    scene_stage.detail = "Generating scene images..."
     db.commit()
 
     try:
@@ -372,10 +372,11 @@ async def generate_scene_images(
             project_path=project_path,
             screenplay=screenplay,
             aspect_ratio=project.aspect_ratio,
+            visual_style=project.visual_style,
         )
 
         scene_stage.status = StageStatus.completed
-        scene_stage.detail = "Photorealistic scene images generated."
+        scene_stage.detail = "Scene images generated."
         db.commit()
 
         return {
