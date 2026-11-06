@@ -29,7 +29,7 @@ class Project(Base):
     story_idea: Mapped[str] = mapped_column(Text, nullable=False)
     target_duration_minutes: Mapped[int] = mapped_column(Integer, default=5)
     language: Mapped[str] = mapped_column(String(20), default="Hindi")
-    visual_style: Mapped[str] = mapped_column(String(100), default="3D animated film")
+    visual_style: Mapped[str] = mapped_column(String(100), default="Photorealistic live-action cinematic")
     aspect_ratio: Mapped[str] = mapped_column(String(10), default="16:9")
     status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus), default=ProjectStatus.draft)
     project_path: Mapped[str] = mapped_column(String(500), nullable=False)
