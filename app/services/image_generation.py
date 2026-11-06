@@ -345,13 +345,15 @@ characters, props, and locations. Do not assume a fixed list of properties.
 Infer relevant state details from the screenplay itself.
 
 For every scene, return one asset_states entry with its scene_id and an
-entities array. Include entities appearing in that scene whose visible state
-is relevant to continuity. Each entity record must contain:
+entities array. Include every character, prop, and location that appears in the scene
+according to the screenplay and scene asset mapping. Each entity record
+must contain a complete visible-state snapshot, even when no temporary
+change has occurred. Each entity record must contain:
 - entity_id: an existing character_id, prop_id, or location_id
 - entity_type: character, prop, or location
 - state: a concise but sufficiently detailed description of the entity's
-  complete visible state in this scene, including relevant condition,
-  position, contents, wear, clothing changes, environmental changes, etc.
+  complete visible state in this scene. If no temporary change is specified,
+  explicitly state that its permanent identity is unchanged.
 - transition_from_previous: explain what changed from its prior scene state.
   For the first appearance, describe its initial state. If nothing changed,
   explicitly say that the previous state is unchanged.
@@ -500,6 +502,34 @@ Return an asset_states entry for every scene, even when entities is empty.
                     raise ValueError(f"Unknown entity ID in scene state: {entity_id}")
                 if not entity.get("state"):
                     raise ValueError(f"Missing state description for entity {entity_id}")
+
+        scene_lookup = {
+            scene.get("scene_id"): scene
+            for scene in screenplay.get("scenes", [])
+        }
+        mapping_lookup = {
+            item.get("scene_id"): item
+            for item in data["scene_assets"]
+        }
+        for state_record in state_records:
+            scene_id = state_record.get("scene_id")
+            scene = scene_lookup.get(scene_id, {})
+            mapping = mapping_lookup.get(scene_id, {})
+            expected_entities = (
+                set(scene.get("characters", []))
+                | set(mapping.get("prop_ids", []))
+                | set(mapping.get("location_ids", []))
+            )
+            actual_entities = {
+                entity.get("entity_id")
+                for entity in state_record.get("entities", [])
+            }
+            missing_entities = expected_entities - actual_entities
+            if missing_entities:
+                raise ValueError(
+                    f"Scene {scene_id} is missing state snapshots for: "
+                    + ", ".join(sorted(missing_entities))
+                )
 
         missing_state_scenes = scene_ids - state_scene_ids
         if missing_state_scenes:
