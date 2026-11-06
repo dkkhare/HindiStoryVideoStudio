@@ -1,6 +1,6 @@
 # Hindi Story Video Studio
 
-A modular FastAPI application scaffold for producing Hindi story videos:
+A modular FastAPI application scaffold for producing story-driven videos in a configurable language and visual style:
 Gemini screenplay planning, character/prop continuity, Gemini image generation,
 Gemini TTS or F5-TTS audio, ComfyUI/LTX-2.5 video generation, and FFmpeg post-production.
 
@@ -58,7 +58,7 @@ Create project:
 POST /api/projects
 Content-Type: application/json
 
-{"title":"Thirsty Crow","story_idea":"A thirsty crow finds a pot...","target_duration_minutes":5}
+{"title":"Example Story","story_idea":"Describe the premise, characters, setting, and central conflict...","target_duration_minutes":5}
 ```
 
 Generate screenplay:
