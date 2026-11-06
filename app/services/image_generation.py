@@ -282,15 +282,9 @@ TASK 1: PROPS
 
 Identify all important recurring physical objects.
 
-Examples:
-- Pots
-- Cups
-- Furniture
-- Vehicles
-- Tools
-- Toys
-- Clothing accessories
-- Important story objects
+Include recurring or story-critical physical objects identified
+from this screenplay. Do not create a fixed category list or
+invent objects that are not supported by the story.
 
 Give every prop a permanent ID:
 PROP_001, PROP_002, etc.
@@ -300,9 +294,10 @@ For each prop provide:
 - Description
 - Detailed visual_lock
 
-The visual_lock must specify exact:
-shape, dimensions, proportions, color, material,
-surface texture, condition and distinctive features.
+The visual_lock must describe permanent identity only:
+shape, proportions, color, material, surface texture,
+and distinctive identifying features. Do not place temporary
+story conditions in visual_lock; describe those in asset_states.
 
 Do not create duplicate entries for the same object.
 
@@ -318,9 +313,10 @@ For each location provide:
 - Description
 - Detailed visual_lock
 
-The visual_lock must specify:
-architecture, layout, ground, background objects,
-vegetation, lighting, color palette and environment.
+The visual_lock must describe stable environmental identity:
+architecture, layout, terrain, permanent background elements,
+and characteristic vegetation. Describe story-driven changes
+such as weather, damage, lighting, or temporary activity in asset_states.
 
 Do not create duplicate entries for the same location.
 
@@ -597,10 +593,10 @@ surface, texture and condition specified above.
 This is the permanent prop reference for the film.
 
 IMPORTANT:
-If the object contains water or another liquid,
-show only the condition specified in its visual_lock.
-Do not make transparent objects unless specified.
-Do not add extra objects.
+Show the object's stable identity clearly. Do not invent or
+emphasize a temporary story condition in this master reference;
+the scene-specific state instructions will define its condition
+in each scene. Do not add extra objects.
 No labels, text, letters or watermark.
 """
 
