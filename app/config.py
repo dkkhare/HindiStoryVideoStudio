@@ -23,7 +23,11 @@ class Settings(BaseSettings):
 
     f5tts_base_url: str = "http://127.0.0.1:7860"
     f5tts_api_path: str = "/api/predict"
-    default_tts_provider: str = "voicebox"\n    voicebox_base_url: str = "http://127.0.0.1:17493"\n    voicebox_engine: str = "chatterbox"\n    voicebox_timeout_seconds: int = 600\n    voicebox_generation_timeout_seconds: int = 600
+    default_tts_provider: str = "voicebox"
+    voicebox_base_url: str = "http://127.0.0.1:17493"
+    voicebox_engine: str = "chatterbox"
+    voicebox_timeout_seconds: int = 600
+    voicebox_generation_timeout_seconds: int = 600
 
     default_video_width: int = 1280
     default_video_height: int = 720
