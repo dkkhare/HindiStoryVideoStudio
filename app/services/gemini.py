@@ -12,7 +12,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.8-flash"
+# Text model is selected through app settings.
 
 
 SCREENPLAY_SCHEMA = {
@@ -110,7 +110,7 @@ class GeminiService:
             api_key=settings.gemini_api_key
         )
 
-        self.model = MODEL_NAME
+        self.model = settings.gemini_text_model
         self.image_model = settings.gemini_image_model
 
     # ---------------------------------------------------------
@@ -130,10 +130,12 @@ class GeminiService:
         target_seconds = duration_minutes * 60
 
         prompt = f"""
-You are an expert Hindi children's story writer,
-screenplay director and AI video production planner.
+You are an experienced screenwriter, story editor, and visual production planner.
 
-Create a complete production-ready screenplay.
+Create a complete, production-ready screenplay from the user's story idea.
+Respect the genre, tone, setting, intended audience, cultural context, and
+storytelling style implied by the idea. Do not assume a particular country,
+culture, audience age, genre, or animation/live-action format unless specified.
 
 STORY IDEA:
 {story_idea}
@@ -150,72 +152,54 @@ VISUAL STYLE:
 ASPECT RATIO:
 {aspect_ratio}
 
-IMPORTANT PRODUCTION REQUIREMENTS:
+SCENE LENGTH GUIDANCE:
+Aim for scene durations near {settings.default_scene_seconds} seconds, adjusting
+naturally when the action, dialogue, pacing, or story structure requires it.
+All scene durations combined must equal approximately {target_seconds} seconds.
+Maximum permitted deviation: 5 percent.
 
-1. Divide the story into scenes suitable for AI
-   image-to-video generation.
+PRODUCTION REQUIREMENTS:
 
-2. Normally use 10-15 second scenes.
-
-3. All scene durations combined must equal
-   approximately {target_seconds} seconds.
-   Maximum permitted deviation: 5 percent.
-
-4. Give every character a permanent unique ID:
-   CHAR_001, CHAR_002, etc.
-
-5. CHARACTER CONSISTENCY:
-   Write a detailed visual_lock for every character.
-   Specify exact appearance, colors, clothing,
-   body proportions, facial features and accessories.
-
-6. Never change a character's identity, appearance,
-   clothing or proportions between scenes.
-
-7. PROPS AND LOCATION CONSISTENCY:
-   Important props must retain exactly the same
-   shape, color, material, size and condition
-   across all scenes.
-
-8. Each scene must contain:
+1. Divide the story into clear, visually producible scenes.
+2. Give every character a permanent unique ID: CHAR_001, CHAR_002, etc.
+3. CHARACTER CONSISTENCY:
+   Write a detailed visual_lock for every character. Specify stable identity
+   features such as appearance, colors, clothing, proportions, facial features,
+   and distinctive accessories. Do not confuse stable identity with temporary
+   scene states such as wet clothing, injury, dirt, emotion, or pose.
+4. ASSET AND STATE CONTINUITY:
+   Keep the identity of recurring objects and locations consistent. A character,
+   object, or location may undergo story-driven changes. Describe those changes
+   in the relevant scene instead of incorrectly freezing its condition.
+   Preserve the result of a change in all later scenes until the screenplay
+   explicitly changes it again.
+5. Each scene must contain:
    - Scene ID
    - Duration
    - Summary
-   - Characters appearing in the scene
+   - Character IDs appearing in the scene
    - Detailed image generation prompt
    - Motion-focused video generation prompt
    - Ordered dialogue and narration segments
-
-9. All spoken dialogue must be natural Hindi
-   written in Devanagari script.
-
-10. Use NARRATOR for narration.
-    Use the corresponding character ID for
-    character dialogue.
-
-11. Keep dialogue short enough for the scene duration.
-
-12. Estimate the duration of every spoken segment.
-
-13. Maintain continuity of locations, props,
-    clothing, lighting, weather and time of day.
-
-14. Image prompts must describe the complete
-    visual composition, camera framing, lighting
-    and character positions.
-
-15. Video prompts must describe natural,
-    physically plausible movements.
-
-16. Do not include subtitles, logos, written text,
-    watermarks or captions inside image prompts.
-
-17. Make the screenplay cinematic, emotionally
-    engaging and suitable for family audiences.
-
-18. Return ONLY valid structured JSON matching
-    the supplied schema.
-"""
+6. Write all dialogue and narration in {language}. Use the writing system
+   appropriate to that language. Do not translate dialogue into another
+   language unless the story requests it.
+7. Use NARRATOR for narration. Use the corresponding character ID for
+   character dialogue.
+8. Keep dialogue and narration short enough for the scene duration.
+9. Estimate the duration of every spoken segment.
+10. Maintain continuity of location, props, character identity, scene state,
+    lighting, weather, and time of day.
+11. Image prompts must describe the complete visual composition, camera
+    framing, lighting, and character positions.
+12. Video prompts must describe natural, physically plausible movements
+    appropriate to the chosen visual style and story world.
+13. Do not include subtitles, logos, written text, watermarks, or captions
+    inside image prompts unless the story explicitly requires visible text.
+14. Make the screenplay emotionally engaging and appropriate to the story's
+    intended audience; do not impose a family or children's audience by default.
+15. Return ONLY valid structured JSON matching the supplied schema.
+""""""
 
         logger.info(
             "Generating screenplay using model: %s",
