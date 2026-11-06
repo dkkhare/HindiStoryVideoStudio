@@ -7,7 +7,7 @@ class ProjectCreate(BaseModel):
     story_idea: str = Field(min_length=10)
     target_duration_minutes: int = Field(default=5, ge=1, le=180)
     language: str = "Hindi"
-    visual_style: str = "3D animated film"
+    visual_style: str = "Photorealistic live-action cinematic"
     aspect_ratio: str = "16:9"
 
 class StageOut(BaseModel):
