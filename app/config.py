@@ -23,14 +23,14 @@ class Settings(BaseSettings):
 
     f5tts_base_url: str = "http://127.0.0.1:7860"
     f5tts_api_path: str = "/api/predict"
-    default_tts_provider: str = "f5tts"
+    default_tts_provider: str = "voicebox"\n    voicebox_base_url: str = "http://127.0.0.1:17493"\n    voicebox_engine: str = "chatterbox"\n    voicebox_timeout_seconds: int = 600\n    voicebox_generation_timeout_seconds: int = 600
 
     default_video_width: int = 1280
     default_video_height: int = 720
     default_fps: int = 24
     default_scene_seconds: int = 15
     max_parallel_image_jobs: int = 2
-    max_parallel_audio_jobs: int = 2
+    max_parallel_audio_jobs: int = 1
     max_parallel_video_jobs: int = 1
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
