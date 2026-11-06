@@ -48,9 +48,21 @@ def _sample_asset_bible():
                 "scene_id": "SCENE_001",
                 "entities": [
                     {
+                        "entity_id": "CHAR_001",
+                        "entity_type": "character",
+                        "state": "The traveler has their usual appearance.",
+                        "transition_from_previous": "Initial appearance.",
+                    },
+                    {
                         "entity_id": "PROP_001",
                         "entity_type": "prop",
                         "state": "The device is switched off and undamaged.",
+                        "transition_from_previous": "Initial appearance.",
+                    },
+                    {
+                        "entity_id": "LOC_001",
+                        "entity_type": "location",
+                        "state": "The interior is in its established condition.",
                         "transition_from_previous": "Initial appearance.",
                     }
                 ],
@@ -59,10 +71,22 @@ def _sample_asset_bible():
                 "scene_id": "SCENE_002",
                 "entities": [
                     {
+                        "entity_id": "CHAR_001",
+                        "entity_type": "character",
+                        "state": "The traveler has their usual appearance.",
+                        "transition_from_previous": "No change from the previous appearance.",
+                    },
+                    {
                         "entity_id": "PROP_001",
                         "entity_type": "prop",
                         "state": "The device is switched on; its outer appearance is unchanged.",
                         "transition_from_previous": "The device was switched on.",
+                    },
+                    {
+                        "entity_id": "LOC_001",
+                        "entity_type": "location",
+                        "state": "The interior is in its established condition.",
+                        "transition_from_previous": "No change from the previous scene.",
                     }
                 ],
             },
