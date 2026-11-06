@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hindi Story Video Studio</title><link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+<header><div><h1>Hindi Story Video Studio</h1><p>Plan, produce and assemble Hindi story films</p></div><span class="pill">Development build · 0.1.0</span></header>
+<main>
+<section class="panel">
+  <h2>Create a story project</h2>
+  <form id="project-form">
+    <label>Story title<input name="title" required placeholder="Thirsty Crow"></label>
+    <label>Story idea<textarea name="story_idea" required minlength="10" rows="4" placeholder="Describe your story idea..."></textarea></label>
+    <div class="row">
+      <label>Duration (minutes)<input name="target_duration_minutes" type="number" min="1" max="180" value="5"></label>
+      <label>Visual style<input name="visual_style" value="3D animated film"></label>
+      <label>Aspect ratio<select name="aspect_ratio"><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
+    </div>
+    <button type="submit">Create project</button><p id="message" class="message"></p>
+  </form>
+</section>
+<section class="panel"><h2>Projects</h2><div id="projects" class="projects">Loading projects...</div></section>
+</main>
+<script src="/static/studio.js"></script>
+</body></html>
