@@ -167,7 +167,7 @@ async function renderProject(project) {
                         button,
                         project.id,
                         "references/generate",
-                        "Generating photorealistic references..."
+                        "Generating visual references..."
                     )
                 ));
 
@@ -198,7 +198,7 @@ async function renderProject(project) {
                             button,
                             project.id,
                             "images/generate",
-                            "Generating photorealistic scene images..."
+                            "Generating scene images..."
                         )
                     ));
 
