@@ -102,7 +102,7 @@ class ImageGenerationService:
             api_key=settings.gemini_api_key
         )
 
-        self.text_model = "gemini-3.8-flash"
+        self.text_model = settings.gemini_text_model
         self.semaphore = asyncio.Semaphore(
             max(1, settings.max_parallel_image_jobs)
         )
