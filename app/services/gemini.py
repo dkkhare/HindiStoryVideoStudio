@@ -500,7 +500,7 @@ PRODUCTION REQUIREMENTS:
 
         difference = abs(actual - target) / target
 
-        if difference > 0.10:
+        if difference > 0.05:
             raise ValueError(
                 f"Scene durations total {actual}s; "
                 f"target is {target}s. "
