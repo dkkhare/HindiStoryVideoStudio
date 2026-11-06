@@ -64,9 +64,32 @@ ASSET_BIBLE_SCHEMA = {
                     "scene_id", "prop_ids", "location_ids"
                 ]
             }
+        },
+        "asset_states": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "scene_id": {"type": "string"},
+                    "entities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "entity_id": {"type": "string"},
+                                "entity_type": {"type": "string"},
+                                "state": {"type": "string"},
+                                "transition_from_previous": {"type": "string"}
+                            },
+                            "required": ["entity_id", "entity_type", "state", "transition_from_previous"]
+                        }
+                    }
+                },
+                "required": ["scene_id", "entities"]
+            }
         }
     },
-    "required": ["props", "locations", "scene_assets"]
+    "required": ["props", "locations", "scene_assets", "asset_states"]
 }
 
 
@@ -225,8 +248,8 @@ class ImageGenerationService:
         if output_path.exists() and not force_refresh:
             existing = self.read_json(output_path)
 
-            if isinstance(existing, dict):
-                logger.info("Using existing asset bible")
+            if isinstance(existing, dict) and isinstance(existing.get("asset_states"), list):
+                logger.info("Using existing asset bible with state continuity data")
                 return existing
 
         screenplay_summary = {
@@ -238,6 +261,7 @@ class ImageGenerationService:
                     "scene_id": scene.get("scene_id"),
                     "summary": scene.get("summary"),
                     "image_prompt": scene.get("image_prompt"),
+                    "video_prompt": scene.get("video_prompt"),
                     "characters": scene.get("characters", [])
                 }
                 for scene in screenplay.get("scenes", [])
@@ -245,8 +269,9 @@ class ImageGenerationService:
         }
 
         prompt = f"""
-You are a professional animation production designer
-and visual continuity supervisor.
+You are a professional production designer and visual continuity supervisor.
+Follow the project's selected visual style and the screenplay's own genre,
+setting, culture, tone, and medium.
 
 Analyze this complete screenplay and create an ASSET BIBLE.
 
@@ -316,6 +341,31 @@ IMPORTANT:
 5. Character IDs already exist in the screenplay.
    Do not create new characters.
 6. Return only JSON matching the supplied schema.
+
+TASK 4: SCENE-BY-SCENE ASSET STATE CONTINUITY
+
+Track story-driven state changes for any recurring visual entity, including
+characters, props, and locations. Do not assume a fixed list of properties.
+Infer relevant state details from the screenplay itself.
+
+For every scene, return one asset_states entry with its scene_id and an
+entities array. Include entities appearing in that scene whose visible state
+is relevant to continuity. Each entity record must contain:
+- entity_id: an existing character_id, prop_id, or location_id
+- entity_type: character, prop, or location
+- state: a concise but sufficiently detailed description of the entity's
+  complete visible state in this scene, including relevant condition,
+  position, contents, wear, clothing changes, environmental changes, etc.
+- transition_from_previous: explain what changed from its prior scene state.
+  For the first appearance, describe its initial state. If nothing changed,
+  explicitly say that the previous state is unchanged.
+
+Never invent a state change that the screenplay does not establish.
+A state change persists into later scenes until the screenplay changes it.
+Do not confuse permanent identity details in visual_lock with temporary
+story states. Do not use hard-coded object-specific property lists.
+Use the same entity ID consistently across all scenes.
+Return an asset_states entry for every scene, even when entities is empty.
 """
 
         logger.info("Generating project asset bible")
@@ -425,6 +475,42 @@ IMPORTANT:
                 raise ValueError(
                     f"Unknown location ID in scene {mapping['scene_id']}"
                 )
+
+        valid_entities = {
+            item.get("character_id")
+            for item in screenplay.get("characters", [])
+        } | prop_ids | location_ids
+
+        state_records = data.get("asset_states", [])
+        if not isinstance(state_records, list):
+            raise ValueError("Asset bible asset_states must be a list")
+
+        state_scene_ids = set()
+        for state_record in state_records:
+            scene_id = state_record.get("scene_id")
+            if scene_id not in scene_ids:
+                raise ValueError(f"Unknown scene ID in asset states: {scene_id}")
+            if scene_id in state_scene_ids:
+                raise ValueError(f"Duplicate asset state record for scene: {scene_id}")
+            state_scene_ids.add(scene_id)
+
+            entities = state_record.get("entities", [])
+            if not isinstance(entities, list):
+                raise ValueError(f"Asset states for scene {scene_id} must contain an entities list")
+
+            for entity in entities:
+                entity_id = entity.get("entity_id")
+                if entity_id not in valid_entities:
+                    raise ValueError(f"Unknown entity ID in scene state: {entity_id}")
+                if not entity.get("state"):
+                    raise ValueError(f"Missing state description for entity {entity_id}")
+
+        missing_state_scenes = scene_ids - state_scene_ids
+        if missing_state_scenes:
+            raise ValueError(
+                "Asset states are missing scenes: "
+                + ", ".join(sorted(missing_state_scenes))
+            )
 
     # ---------------------------------------------------------
     # IMAGE PROMPTS
@@ -564,7 +650,8 @@ whenever it appears in the film.
         scene: dict,
         screenplay: dict,
         asset_bible: dict,
-        aspect_ratio: str
+        aspect_ratio: str,
+        visual_style: str = ""
     ) -> str:
 
         character_map = {
@@ -608,6 +695,14 @@ whenever it appears in the film.
             if lid in location_map
         ]
 
+        state_record = next(
+            (
+                item for item in asset_bible.get("asset_states", [])
+                if item.get("scene_id") == scene.get("scene_id")
+            ),
+            {"scene_id": scene.get("scene_id"), "entities": []}
+        )
+
         return f"""
 Create one cinematic production-ready STORY FRAME.
 
@@ -626,6 +721,9 @@ ORIGINAL SCENE IMAGE PROMPT:
 ASPECT RATIO:
 {aspect_ratio}
 
+PROJECT VISUAL STYLE:
+{visual_style or "Follow the visual style established by the screenplay and approved reference images."}
+
 CHARACTER IDENTITY LOCKS:
 {json.dumps(characters, ensure_ascii=False, indent=2)}
 
@@ -635,6 +733,9 @@ PROP IDENTITY LOCKS:
 LOCATION IDENTITY LOCKS:
 {json.dumps(locations, ensure_ascii=False, indent=2)}
 
+CURRENT SCENE ASSET STATES:
+{json.dumps(state_record.get("entities", []), ensure_ascii=False, indent=2)}
+
 VISUAL CONTINUITY RULES:
 
 1. The supplied reference images are authoritative.
@@ -642,16 +743,17 @@ VISUAL CONTINUITY RULES:
 3. Every prop must match its reference image.
 4. Every location must match its reference image.
 5. Never redesign or reinterpret a reference asset.
-6. Never change clothing, colors, proportions or identity.
-7. Do not add characters that are not in this scene.
-8. Do not add unnecessary props.
-9. Respect the original scene composition and action.
-10. Keep lighting and environmental continuity.
+6. Preserve permanent identity, while applying only the story-driven
+   state changes specified for this scene.
+7. Do not reset an entity to its initial condition after a later state change.
+8. Do not add characters that are not in this scene.
+9. Do not add unnecessary props.
+10. Respect the original scene composition and action.
+11. Keep lighting and environmental continuity.
 
 CINEMATIC REQUIREMENTS:
 
-Create a beautiful, detailed, professional animated
-feature-film frame.
+Create one polished production-ready frame in the selected project visual style.
 
 Use natural anatomy and physically plausible poses.
 Use expressive but natural facial expressions.
@@ -675,20 +777,18 @@ logos, labels or watermarks.
         output_path: Path,
         reference_images: list[Path],
         aspect_ratio: str,
-        image_size: str
+        image_size: str,
+        visual_style: str = ""
     ) -> dict:
         prompt = f"""
-PHOTOREALISM REQUIREMENT — MUST FOLLOW:
+PROJECT VISUAL STYLE:
+{visual_style or "Follow the visual style explicitly described in the scene prompt and approved reference images."}
 
-Create a photorealistic live-action film frame.
-The result must look like a real photograph captured by a professional cinema camera.
-Use physically realistic animals, objects, materials, lighting, shadows and environments.
-Natural photographic detail, realistic proportions, authentic Indian rural setting.
-Cinematic composition, lifelike textures, realistic depth of field.
-
-STRICTLY AVOID:
-cartoon, 3D cartoon, animation, anime, illustration, painting,
-storybook art, toy-like objects, plastic textures, exaggerated proportions.
+STYLE AND CONTINUITY:
+Apply the selected visual style consistently to this image. Do not impose a
+different medium, genre, culture, location, or artistic treatment. Match the
+approved reference images while respecting the current scene's requested state.
+Do not add text, labels, captions, or watermarks unless explicitly required.
 
 SCENE DESCRIPTION:
 {prompt}
@@ -797,7 +897,8 @@ SCENE DESCRIPTION:
                         output_path,
                         [],
                         "3:4",
-                        image_size
+                        image_size,
+                        visual_style
                     )
 
                     record.update({
@@ -861,7 +962,8 @@ SCENE DESCRIPTION:
                         output_path,
                         [],
                         "1:1",
-                        image_size
+                        image_size,
+                        visual_style
                     )
 
                     record.update({
@@ -925,7 +1027,8 @@ SCENE DESCRIPTION:
                         output_path,
                         [],
                         aspect_ratio,
-                        image_size
+                        image_size,
+                        visual_style
                     )
 
                     record.update({
@@ -979,7 +1082,8 @@ SCENE DESCRIPTION:
         screenplay: dict,
         aspect_ratio: str = "16:9",
         image_size: str = "1K",
-        force_regenerate: bool = False
+        force_regenerate: bool = False,
+        visual_style: str = ""
     ) -> dict:
 
         project_path = Path(project_path)
@@ -1099,7 +1203,8 @@ SCENE DESCRIPTION:
                     scene,
                     screenplay,
                     asset_bible,
-                    aspect_ratio
+                    aspect_ratio,
+                    visual_style
                 )
 
                 record["status"] = "running"
@@ -1112,7 +1217,8 @@ SCENE DESCRIPTION:
                         output_path,
                         reference_paths,
                         aspect_ratio,
-                        image_size
+                        image_size,
+                        visual_style
                     )
 
                     record.update({
