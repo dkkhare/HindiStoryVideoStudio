@@ -35,3 +35,8 @@ class ScreenplayResponse(BaseModel):
     project_id: int
     screenplay: dict
     saved_to: str
+
+
+class AudioGenerateRequest(BaseModel):
+    profile_id: str = Field(min_length=1)
+    engine: str = Field(default="chatterbox", pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$")
