@@ -6,7 +6,7 @@ class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     story_idea: str = Field(min_length=10)
     target_duration_minutes: int = Field(default=5, ge=1, le=180)
-    language: str = "Hindi"
+    language: str = Field(default="Hindi", min_length=1, max_length=20)
     visual_style: str = "Photorealistic live-action cinematic"
     aspect_ratio: str = "16:9"
 
