@@ -73,7 +73,7 @@ async function renderProject(project) {
 
         const screenplay = status.screenplay;
         const references = status.character_bible;
-        const scenes = status.scene_images;
+        const scenes = status.scene_images;\n        const audio = status.audio;
 
         if (!screenplay || screenplay.status === "pending" ||
             screenplay.status === "failed") {
@@ -216,11 +216,6 @@ async function renderProject(project) {
                         "Scene images completed successfully."
                     );
 
-                    const next = document.createElement("p");
-                    next.textContent =
-                        "Next stage: Audio Production (coming next).";
-                    workflow.appendChild(next);
-
                     return;
                 }
             }
@@ -283,3 +278,108 @@ form.addEventListener("submit", async event => {
 });
 
 loadProjects();
+
+
+
+async function renderAudioStage(workflow, project, audioStage) {
+    const panel = document.createElement("div");
+    panel.className = "audio-stage";
+    const heading = document.createElement("h4");
+    heading.textContent = "Audio Production";
+    panel.appendChild(heading);
+
+    if (audioStage && audioStage.status === "running") {
+        setMessage(panel, audioStage.detail || "Generating audio...");
+        workflow.appendChild(panel);
+        return;
+    }
+
+    if (audioStage && audioStage.status === "completed") {
+        setMessage(panel, audioStage.detail || "Audio generation completed.");
+        try {
+            const manifest = await api(`/api/projects/${project.id}/audio`);
+            for (const scene of (manifest.scenes || [])) {
+                const section = document.createElement("div");
+                const title = document.createElement("p");
+                title.textContent = scene.scene_id;
+                section.appendChild(title);
+                if (scene.audio) {
+                    const audio = document.createElement("audio");
+                    audio.controls = true;
+                    audio.preload = "none";
+                    audio.src = `/api/projects/${project.id}/assets/${scene.audio}`;
+                    audio.style.display = "block";
+                    audio.style.width = "100%";
+                    section.appendChild(audio);
+                }
+                for (const segment of (scene.segments || [])) {
+                    const link = document.createElement("a");
+                    link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
+                    link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
+                    link.style.display = "block";
+                    link.target = "_blank";
+                    section.appendChild(link);
+                }
+                panel.appendChild(section);
+            }
+        } catch (error) {
+            setMessage(panel, `Could not load generated audio: ${error.message}`);
+        }
+        workflow.appendChild(panel);
+        return;
+    }
+
+    try {
+        const profiles = await api("/api/voicebox/profiles");
+        const hindiProfiles = profiles.filter(profile => profile.language === "hi");
+        const available = hindiProfiles.length ? hindiProfiles : profiles;
+        if (!available.length) {
+            setMessage(panel, "No Voicebox voice profiles are available.");
+            workflow.appendChild(panel);
+            return;
+        }
+
+        const label = document.createElement("label");
+        label.textContent = "Voice profile ";
+        const select = document.createElement("select");
+        for (const profile of available) {
+            const option = document.createElement("option");
+            option.value = profile.id;
+            option.textContent = `${profile.name} · ${profile.language}${profile.default_engine ? " · " + profile.default_engine : ""}`;
+            if (profile.name.toLowerCase() === "niya") option.selected = true;
+            select.appendChild(option);
+        }
+        label.appendChild(select);
+        panel.appendChild(label);
+
+        const note = document.createElement("p");
+        note.textContent = "Audio can be generated independently of scene images. The selected voice will be used for narration and all character dialogue in this first version. Voice generation runs one segment at a time to limit GPU memory use.";
+        panel.appendChild(note);
+
+        panel.appendChild(createButton(
+            "Generate Scene Audio",
+            async button => {
+                button.disabled = true;
+                button.textContent = "Generating audio... please wait";
+                try {
+                    await api(`/api/projects/${project.id}/audio/generate`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            profile_id: select.value,
+                            engine: "chatterbox"
+                        })
+                    });
+                    await loadProjects();
+                } catch (error) {
+                    button.disabled = false;
+                    button.textContent = "Generate Scene Audio";
+                    setMessage(panel, error.message);
+                }
+            }
+        ));
+    } catch (error) {
+        setMessage(panel, `Voicebox is not available: ${error.message}`);
+    }
+    workflow.appendChild(panel);
+}
