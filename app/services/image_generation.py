@@ -545,16 +545,15 @@ Face clearly visible and recognizable.
 Plain simple neutral studio background.
 Soft, even professional character-design lighting.
 
-The character must have exactly the appearance,
-colors, clothing, proportions, facial features and
-accessories specified above.
-
-This is the permanent master design reference.
-It will be reused in every scene of the film.
+The character must match the permanent identity,
+proportions, facial features, and distinctive features
+specified above. This is a neutral master identity reference.
+Scene-specific state instructions may change temporary
+appearance details when the screenplay requires it.
 
 Do not add other characters.
 Do not add props.
-Do not change clothing.
+Do not invent temporary conditions or wardrobe changes.
 Do not create a collage.
 Do not include labels, letters, text or watermark.
 """
@@ -587,8 +586,8 @@ Show its complete shape and proportions.
 Use a simple neutral studio background.
 Use soft professional lighting.
 
-Preserve the exact material, shape, size, color,
-surface, texture and condition specified above.
+Preserve the exact material, shape, proportions, color,
+surface and texture specified above.
 
 This is the permanent prop reference for the film.
 
@@ -735,9 +734,9 @@ CURRENT SCENE ASSET STATES:
 VISUAL CONTINUITY RULES:
 
 1. The supplied reference images are authoritative.
-2. Every character must match its reference image.
-3. Every prop must match its reference image.
-4. Every location must match its reference image.
+2. Every character must match the permanent identity in its reference image.
+3. Every prop must match the permanent identity in its reference image.
+4. Every location must match the stable environment identity in its reference image.
 5. Never redesign or reinterpret a reference asset.
 6. Preserve permanent identity, while applying only the story-driven
    state changes specified for this scene.
