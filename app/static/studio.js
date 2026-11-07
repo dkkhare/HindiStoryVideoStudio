@@ -2,6 +2,7 @@
 const form = document.getElementById("project-form");
 const message = document.getElementById("message");
 const list = document.getElementById("projects");
+let audioPollingEnabled = false;
 
 async function api(url, options = {}) {
     const response = await fetch(url, options);
@@ -29,6 +30,7 @@ function setMessage(container, text) {
 }
 
 async function loadProjects() {
+    audioPollingEnabled = false;
     list.textContent = "Loading projects...";
 
     try {
@@ -370,6 +372,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     panel.appendChild(assignmentSection);
 
     const status = manifest?.status || audioStage?.status || "pending";
+    if (["running", "pause_requested", "stop_requested"].includes(status)) audioPollingEnabled = true;
     const completed = Number(manifest?.completed || 0);
     const total = Number(manifest?.total || manifest?.segments?.length || 0);
     const detail = document.createElement("p");
@@ -504,5 +507,5 @@ async function renderAudioStage(workflow, project, audioStage) {
 
 // Refresh stage status while background audio generation is running.
 setInterval(() => {
-    if (document.visibilityState === "visible") loadProjects();
+    if (audioPollingEnabled && document.visibilityState === "visible") loadProjects();
 }, 3000);
