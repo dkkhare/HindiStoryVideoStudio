@@ -288,101 +288,221 @@ async function renderAudioStage(workflow, project, audioStage) {
     const panel = document.createElement("div");
     panel.className = "audio-stage";
     const heading = document.createElement("h4");
-    heading.textContent = "Audio Production";
+    heading.textContent = "Audio Production · Voice Assignment";
     panel.appendChild(heading);
 
-    if (audioStage && audioStage.status === "running") {
-        setMessage(panel, audioStage.detail || "Generating audio...");
-        workflow.appendChild(panel);
-        return;
-    }
-
-    if (audioStage && audioStage.status === "completed") {
-        setMessage(panel, audioStage.detail || "Audio generation completed.");
-        try {
-            const manifest = await api(`/api/projects/${project.id}/audio`);
-            for (const scene of (manifest.scenes || [])) {
-                const section = document.createElement("div");
-                const title = document.createElement("p");
-                title.textContent = scene.scene_id;
-                section.appendChild(title);
-                if (scene.audio) {
-                    const audio = document.createElement("audio");
-                    audio.controls = true;
-                    audio.preload = "none";
-                    audio.src = `/api/projects/${project.id}/assets/${scene.audio}`;
-                    audio.style.display = "block";
-                    audio.style.width = "100%";
-                    section.appendChild(audio);
-                }
-                for (const segment of (scene.segments || [])) {
-                    const link = document.createElement("a");
-                    link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
-                    link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
-                    link.style.display = "block";
-                    link.target = "_blank";
-                    section.appendChild(link);
-                }
-                panel.appendChild(section);
-            }
-        } catch (error) {
-            setMessage(panel, `Could not load generated audio: ${error.message}`);
-        }
-        workflow.appendChild(panel);
-        return;
-    }
-
+    let screenplayData;
+    let profiles;
+    let manifest = null;
     try {
-        const profiles = await api("/api/voicebox/profiles");
-        const hindiProfiles = profiles.filter(profile => profile.language === "hi");
-        const available = hindiProfiles.length ? hindiProfiles : profiles;
-        if (!available.length) {
-            setMessage(panel, "No Voicebox voice profiles are available.");
-            workflow.appendChild(panel);
-            return;
-        }
+        [screenplayData, profiles] = await Promise.all([
+            api(`/api/projects/${project.id}/screenplay`),
+            api("/api/voicebox/profiles")
+        ]);
+        manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
+    } catch (error) {
+        setMessage(panel, `Audio setup unavailable: ${error.message}`);
+        workflow.appendChild(panel);
+        return;
+    }
 
+    const screenplay = screenplayData.screenplay || {};
+    const characters = screenplay.characters || [];
+    const speakers = characters.map(character => ({
+        id: character.character_id,
+        name: character.name || character.character_id,
+        kind: "character"
+    })).filter(item => item.id);
+    speakers.push({ id: "NARRATOR", name: "Narrator / Voice-over", kind: "narrator" });
+
+    const hindiProfiles = profiles.filter(profile =>
+        String(profile.language || "").toLowerCase() === "hi" ||
+        String(profile.language || "").toLowerCase() === "hindi"
+    );
+    const available = hindiProfiles.length ? hindiProfiles : profiles;
+    if (!available.length) {
+        setMessage(panel, "Voicebox returned no available voice profiles.");
+        workflow.appendChild(panel);
+        return;
+    }
+
+    const savedAssignments = Object.fromEntries(
+        (manifest?.voice_assignments || []).map(item => [item.speaker_id, item.profile_id])
+    );
+    const selectors = {};
+    const assignmentSection = document.createElement("div");
+    assignmentSection.className = "voice-assignment-list";
+    const assignmentHeading = document.createElement("p");
+    assignmentHeading.textContent = "Choose a separate voice profile for every character and for narration:";
+    assignmentSection.appendChild(assignmentHeading);
+
+    for (const speaker of speakers) {
         const label = document.createElement("label");
-        label.textContent = "Voice profile ";
+        label.className = "voice-assignment";
+        const title = document.createElement("span");
+        title.textContent = speaker.kind === "narrator"
+            ? speaker.name
+            : `${speaker.name} (${speaker.id})`;
         const select = document.createElement("select");
+        select.dataset.speakerId = speaker.id;
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select voice profile…";
+        select.appendChild(placeholder);
+
         for (const profile of available) {
             const option = document.createElement("option");
             option.value = profile.id;
-            option.textContent = `${profile.name} · ${profile.language}${profile.default_engine ? " · " + profile.default_engine : ""}`;
-            if (profile.name.toLowerCase() === "niya") option.selected = true;
+            option.textContent = `${profile.name} · ${profile.language || "language not specified"}${profile.default_engine ? " · " + profile.default_engine : ""}`;
+            if (String(profile.id) === String(savedAssignments[speaker.id] || "")) {
+                option.selected = true;
+            } else if (!savedAssignments[speaker.id] && speaker.kind === "narrator" &&
+                       String(profile.name).toLowerCase() === "niya") {
+                option.selected = true;
+            }
             select.appendChild(option);
         }
-        label.appendChild(select);
-        panel.appendChild(label);
+        selectors[speaker.id] = select;
+        label.append(title, select);
+        assignmentSection.appendChild(label);
+    }
+    panel.appendChild(assignmentSection);
 
-        const note = document.createElement("p");
-        note.textContent = "Audio can be generated independently of scene images. The selected voice will be used for narration and all character dialogue in this first version. Voice generation runs one segment at a time to limit GPU memory use.";
-        panel.appendChild(note);
+    const status = manifest?.status || audioStage?.status || "pending";
+    const completed = Number(manifest?.completed || 0);
+    const total = Number(manifest?.total || manifest?.segments?.length || 0);
+    const detail = document.createElement("p");
+    detail.className = "message";
+    detail.textContent = manifest?.detail || audioStage?.detail ||
+        "Assign the voices, then generate the audio.";
+    panel.appendChild(detail);
 
-        panel.appendChild(createButton(
-            "Generate Scene Audio",
+    if (total > 0) {
+        const progress = document.createElement("p");
+        progress.textContent = `Progress: ${completed} / ${total} segments`;
+        panel.appendChild(progress);
+    }
+    if (manifest?.current) {
+        const current = document.createElement("p");
+        current.textContent = `Current operation: ${manifest.current.scene_id} · ${manifest.current.segment_id} · ${manifest.current.speaker}`;
+        panel.appendChild(current);
+    }
+    if (manifest?.error) setMessage(panel, manifest.error);
+
+    const controls = document.createElement("div");
+    controls.className = "audio-controls";
+    panel.appendChild(controls);
+
+    const showGeneratedAssets = () => {
+        const scenes = manifest?.scenes || [];
+        for (const scene of scenes) {
+            const section = document.createElement("div");
+            section.className = "audio-scene";
+            const title = document.createElement("p");
+            title.textContent = scene.scene_id;
+            section.appendChild(title);
+            if (scene.audio) {
+                const audio = document.createElement("audio");
+                audio.controls = true;
+                audio.preload = "none";
+                audio.src = `/api/projects/${project.id}/assets/${scene.audio}`;
+                audio.style.display = "block";
+                audio.style.width = "100%";
+                section.appendChild(audio);
+            }
+            for (const segment of (scene.segments || [])) {
+                if (!segment.audio) continue;
+                const link = document.createElement("a");
+                link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
+                link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
+                link.target = "_blank";
+                link.style.display = "block";
+                section.appendChild(link);
+            }
+            panel.appendChild(section);
+        }
+        if (manifest?.segments?.length) {
+            const completedSegments = manifest.segments.filter(item => item.status === "completed");
+            if (completedSegments.length && !scenes.length) {
+                const listTitle = document.createElement("p");
+                listTitle.textContent = "Completed audio segments:";
+                panel.appendChild(listTitle);
+                for (const segment of completedSegments) {
+                    const link = document.createElement("a");
+                    link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
+                    link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
+                    link.target = "_blank";
+                    link.style.display = "block";
+                    panel.appendChild(link);
+                }
+            }
+        }
+    };
+
+    const addControl = (label, endpoint, cssClass) => {
+        const button = createButton(label, async btn => {
+            btn.disabled = true;
+            try {
+                await api(`/api/projects/${project.id}/audio/${endpoint}`, { method: "POST" });
+                await loadProjects();
+            } catch (error) {
+                btn.disabled = false;
+                setMessage(panel, error.message);
+            }
+        });
+        if (cssClass) button.className = cssClass;
+        controls.appendChild(button);
+    };
+
+    if (["running", "pause_requested", "stop_requested"].includes(status)) {
+        assignmentSection.querySelectorAll("select").forEach(select => select.disabled = true);
+        addControl(status === "running" ? "Pause after current segment" : "Pause requested…", "control/pause", "secondary");
+        addControl(status === "running" ? "Stop after current segment" : "Stop requested…", "control/stop", "danger");
+    } else {
+        const generateButton = createButton(
+            manifest ? "Generate / Continue Audio" : "Generate Scene Audio",
             async button => {
+                const voiceAssignments = {};
+                for (const [speakerId, select] of Object.entries(selectors)) {
+                    if (!select.value) {
+                        setMessage(panel, `Please select a voice profile for ${speakerId}.`);
+                        select.focus();
+                        return;
+                    }
+                    voiceAssignments[speakerId] = select.value;
+                }
                 button.disabled = true;
-                button.textContent = "Generating audio... please wait";
+                button.textContent = "Starting audio generation…";
                 try {
                     await api(`/api/projects/${project.id}/audio/generate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            profile_id: select.value,
-                            engine: "chatterbox"
-                        })
+                        body: JSON.stringify({ voice_assignments: voiceAssignments, engine: "chatterbox" })
                     });
                     await loadProjects();
                 } catch (error) {
                     button.disabled = false;
-                    button.textContent = "Generate Scene Audio";
+                    button.textContent = manifest ? "Generate / Continue Audio" : "Generate Scene Audio";
                     setMessage(panel, error.message);
                 }
             }
-        ));
-    } catch (error) {
-        setMessage(panel, `Voicebox is not available: ${error.message}`);
+        );
+        controls.appendChild(generateButton);
+
+        if (manifest && ["paused", "stopped", "failed", "running", "pause_requested", "stop_requested"].includes(status)) {
+            addControl("Resume from checkpoint", "resume", "secondary");
+        }
+    }
+
+    if (status === "completed" || (manifest?.segments || []).some(item => item.status === "completed")) {
+        showGeneratedAssets();
     }
     workflow.appendChild(panel);
 }
+
+
+// Refresh stage status while background audio generation is running.
+setInterval(() => {
+    if (document.visibilityState === "visible") loadProjects();
+}, 3000);
