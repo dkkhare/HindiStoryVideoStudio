@@ -20,6 +20,8 @@ class StageStatus(str, enum.Enum):
     waiting_approval = "waiting_approval"
     completed = "completed"
     failed = "failed"
+    paused = "paused"
+    stopped = "stopped"
     skipped = "skipped"
 
 class Project(Base):

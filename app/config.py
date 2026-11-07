@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_client_id: str = "hindi-story-studio"
+    comfyui_api_key: str = ""
+    comfyui_request_timeout_seconds: int = 2700
     comfyui_workflow_json: Path = Path("./workflows/ltx25_i2v_api.json")
     comfyui_output_dir: str = ""
 
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
     default_video_height: int = 720
     default_fps: int = 24
     default_scene_seconds: int = 15
+    default_video_scene_seconds: int = 15
     max_parallel_image_jobs: int = 2
     max_parallel_audio_jobs: int = 1
     max_parallel_video_jobs: int = 1
