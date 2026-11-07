@@ -102,13 +102,26 @@ def required_speakers(screenplay: dict) -> list[dict[str, str]]:
 
 def _flatten(screenplay: dict) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
+    speaker_lookup = {}
+    for character in screenplay.get("characters") or []:
+        character_id = str(character.get("character_id") or character.get("id") or "").strip()
+        character_name = str(character.get("name") or "").strip()
+        if character_id:
+            speaker_lookup[character_id.casefold()] = character_id
+        if character_name and character_id:
+            speaker_lookup[character_name.casefold()] = character_id
+
     for scene_index, scene in enumerate(screenplay.get("scenes") or [], start=1):
         scene_id = str(scene.get("scene_id") or f"SCENE_{scene_index:03d}")
         for segment_index, segment in enumerate(scene.get("dialogue_and_narration") or [], start=1):
             text = str(segment.get("text") or "").strip()
             if not text:
                 continue
-            speaker = str(segment.get("speaker") or "NARRATOR").strip() or "NARRATOR"
+            raw_speaker = str(segment.get("speaker") or "NARRATOR").strip() or "NARRATOR"
+            if raw_speaker.casefold() in {"narrator", "voiceover", "voice-over", "voice over"}:
+                speaker = "NARRATOR"
+            else:
+                speaker = speaker_lookup.get(raw_speaker.casefold(), raw_speaker)
             segment_id = str(segment.get("segment_id") or f"SEG_{segment_index:03d}")
             filename = f"{_safe(segment_id)}_{_safe(speaker)}.wav"
             relative = f"audio/{_safe(scene_id)}/{filename}"
