@@ -3,3 +3,7 @@
 
 /* Per-speaker voice setup and checkpoint controls */
 .audio-stage{width:100%;display:grid;gap:12px;padding:14px;margin-top:12px;border:1px solid #304159;border-radius:10px;background:#142033}.audio-stage h4{margin:0;font-size:16px}.voice-assignment-list{display:grid;gap:10px}.voice-assignment{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,2fr);align-items:center;gap:12px;padding:8px 10px;background:#101a29;border:1px solid #304159;border-radius:8px}.voice-assignment span{color:#dce5f3;font-size:13px}.audio-controls{display:flex;flex-wrap:wrap;gap:8px}.audio-controls button.secondary{background:#53647c}.audio-controls button.danger{background:#a94343}.audio-scene{padding:10px 0;border-top:1px solid #304159}.audio-scene p{font-weight:600}@media(max-width:650px){.voice-assignment{grid-template-columns:1fr}}
+
+
+/* Kaggle ComfyUI / LTX scene-video production */
+.video-stage{width:100%;display:grid;gap:12px;padding:14px;margin-top:12px;border:1px solid #3b5272;border-radius:10px;background:#142033}.video-stage h4{margin:0;font-size:16px}.video-scene{padding:12px 0;border-top:1px solid #304159}.video-scene p{font-weight:600;margin:0 0 8px}.video-stage video{display:block;border-radius:8px;background:#080c12}
