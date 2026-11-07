@@ -22,6 +22,13 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
+from app.services.video_production import (
+    read_manifest as read_video_manifest,
+    write_manifest as write_video_manifest,
+    start_video_worker,
+    video_worker_active,
+    request_video_control,
+)
 from app.services.audio_production import (
     _flatten,
     audio_worker_active,
