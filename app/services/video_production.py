@@ -120,7 +120,7 @@ class KaggleComfyClient:
             record = history.get(prompt_id) if isinstance(history, dict) else None
             if record:
                 status = record.get("status") or {}
-                if status.get("completed") or record.get("outputs"):
+                if status.get("completed") or str(status.get("status_str") or "").lower() == "success":
                     return record
                 status_text = str(status.get("status_str") or "").lower()
                 if status_text in {"error", "failed"}:
