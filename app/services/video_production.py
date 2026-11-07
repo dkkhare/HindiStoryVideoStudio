@@ -289,7 +289,11 @@ async def _run_worker(project_id: int, project_path: Path, screenplay: dict) -> 
                 except ValueError as exc:
                     raise RuntimeError(f"Invalid media path in manifest for {scene_id}") from exc
 
-                # Match the generated clip length to the scene audio unless the screenplay\n                # explicitly supplies a duration. This prevents trimming longer dialogue.\n                audio_duration = _wav_duration(audio_path)\n                duration = float(scene.get("duration_seconds") or scene.get("duration") or audio_duration or duration_default)\n                duration = max(1.0, min(duration, 60.0))
+                # Match the generated clip length to the scene audio unless the screenplay
+                # explicitly supplies a duration. This prevents trimming longer dialogue.
+                audio_duration = _wav_duration(audio_path)
+                duration = float(scene.get("duration_seconds") or scene.get("duration") or audio_duration or duration_default)
+                duration = max(1.0, min(duration, 60.0))
                 workflow = _load_workflow()
                 suffix = uuid.uuid4().hex[:10]
                 remote_image = await client_config.upload_input(
