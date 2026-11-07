@@ -289,6 +289,7 @@ loadProjects();
 async function renderAudioStage(workflow, project, audioStage) {
     const panel = document.createElement("div");
     panel.className = "audio-stage";
+    panel.dataset.projectId = project.id;
     const heading = document.createElement("h4");
     heading.textContent = "Audio Production · Voice Assignment";
     panel.appendChild(heading);
@@ -372,26 +373,40 @@ async function renderAudioStage(workflow, project, audioStage) {
     panel.appendChild(assignmentSection);
 
     const status = manifest?.status || audioStage?.status || "pending";
+    panel.dataset.audioStatus = status;
     if (["running", "pause_requested", "stop_requested"].includes(status)) audioPollingEnabled = true;
     const completed = Number(manifest?.completed || 0);
     const total = Number(manifest?.total || manifest?.segments?.length || 0);
     const detail = document.createElement("p");
     detail.className = "message";
+    detail.dataset.role = "audio-detail";
     detail.textContent = manifest?.detail || audioStage?.detail ||
         "Assign the voices, then generate the audio.";
     panel.appendChild(detail);
 
-    if (total > 0) {
-        const progress = document.createElement("p");
-        progress.textContent = `Progress: ${completed} / ${total} segments`;
-        panel.appendChild(progress);
-    }
+    const progress = document.createElement("p");
+    progress.dataset.role = "audio-progress";
+    progress.textContent = total > 0
+        ? `Progress: ${completed} / ${total} segments`
+        : "Progress: waiting for audio segments";
+    progress.hidden = total <= 0;
+    panel.appendChild(progress);
+
+    const current = document.createElement("p");
+    current.dataset.role = "audio-current";
     if (manifest?.current) {
-        const current = document.createElement("p");
         current.textContent = `Current operation: ${manifest.current.scene_id} · ${manifest.current.segment_id} · ${manifest.current.speaker}`;
-        panel.appendChild(current);
+    } else {
+        current.hidden = true;
     }
-    if (manifest?.error) setMessage(panel, manifest.error);
+    panel.appendChild(current);
+
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "message";
+    errorMessage.dataset.role = "audio-error";
+    errorMessage.textContent = manifest?.error || "";
+    errorMessage.hidden = !manifest?.error;
+    panel.appendChild(errorMessage);
 
     const controls = document.createElement("div");
     controls.className = "audio-controls";
@@ -505,7 +520,100 @@ async function renderAudioStage(workflow, project, audioStage) {
 }
 
 
-// Refresh stage status while background audio generation is running.
-setInterval(() => {
-    if (audioPollingEnabled && document.visibilityState === "visible") loadProjects();
+// Poll only the audio manifest. Keep project cards, voice selectors and controls
+// mounted while a segment is being generated.
+let audioPollInFlight = false;
+
+setInterval(async () => {
+    if (
+        !audioPollingEnabled ||
+        document.visibilityState !== "visible" ||
+        audioPollInFlight
+    ) {
+        return;
+    }
+
+    const panels = Array.from(document.querySelectorAll(".audio-stage"));
+    if (!panels.length) {
+        audioPollingEnabled = false;
+        return;
+    }
+
+    audioPollInFlight = true;
+
+    try {
+        for (const panel of panels) {
+            const projectId = panel.dataset.projectId;
+            if (!projectId) continue;
+
+            const manifest = await api(
+                `/api/projects/${projectId}/audio`
+            ).catch(() => null);
+
+            if (!manifest) continue;
+
+            const detail = panel.querySelector('[data-role="audio-detail"]');
+            const progress = panel.querySelector('[data-role="audio-progress"]');
+            const current = panel.querySelector('[data-role="audio-current"]');
+            const errorMessage = panel.querySelector('[data-role="audio-error"]');
+
+            if (detail) {
+                detail.textContent = manifest.detail || manifest.status || "";
+            }
+
+            if (progress) {
+                const completed = Number(manifest.completed || 0);
+                const total = Number(
+                    manifest.total || manifest.segments?.length || 0
+                );
+                progress.textContent = `Progress: ${completed} / ${total} segments`;
+                progress.hidden = total <= 0;
+            }
+
+            if (current) {
+                if (manifest.current) {
+                    current.textContent =
+                        `Current operation: ${manifest.current.scene_id} · ${manifest.current.segment_id} · ${manifest.current.speaker}`;
+                    current.hidden = false;
+                } else {
+                    current.textContent = "";
+                    current.hidden = true;
+                }
+            }
+
+            if (errorMessage) {
+                errorMessage.textContent = manifest.error || "";
+                errorMessage.hidden = !manifest.error;
+            }
+
+            const activeStatuses = [
+                "running",
+                "pause_requested",
+                "stop_requested"
+            ];
+            const previousStatus = panel.dataset.audioStatus;
+            const nextStatus = manifest.status || previousStatus;
+            panel.dataset.audioStatus = nextStatus;
+
+            // Rebuild once after a real state transition to paused, stopped,
+            // failed or completed, so the appropriate controls/assets appear.
+            if (
+                activeStatuses.includes(previousStatus) &&
+                !activeStatuses.includes(nextStatus)
+            ) {
+                await loadProjects();
+                return;
+            }
+        }
+
+        audioPollingEnabled = panels.some(panel =>
+            ["running", "pause_requested", "stop_requested"].includes(
+                panel.dataset.audioStatus
+            )
+        );
+    } catch (error) {
+        console.error("Audio status polling error:", error);
+    } finally {
+        audioPollInFlight = false;
+    }
 }, 3000);
