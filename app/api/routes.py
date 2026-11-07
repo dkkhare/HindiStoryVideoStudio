@@ -22,6 +22,15 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
+from app.services.audio_production import (
+    _flatten,
+    audio_worker_active,
+    read_manifest,
+    required_speakers,
+    request_audio_control,
+    start_audio_worker,
+    write_manifest,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -453,56 +462,21 @@ async def list_voicebox_profiles():
         ) from exc
 
 
-def _combine_scene_wavs(input_paths: list[Path], output_path: Path) -> bool:
-    """Join compatible PCM WAV segments with a short pause between speakers."""
-    if not input_paths:
-        return False
-    try:
-        with wave.open(str(input_paths[0]), "rb") as first:
-            params = first.getparams()
-            frames = [first.readframes(first.getnframes())]
-        for path in input_paths[1:]:
-            with wave.open(str(path), "rb") as source:
-                if (
-                    source.getnchannels() != params.nchannels
-                    or source.getsampwidth() != params.sampwidth
-                    or source.getframerate() != params.framerate
-                    or source.getcomptype() != params.comptype
-                ):
-                    return False
-                frames.append(source.readframes(source.getnframes()))
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        silence = bytes(int(params.nchannels * params.sampwidth * params.framerate * 0.25))
-        with wave.open(str(output_path), "wb") as target:
-            target.setparams(params)
-            for index, chunk in enumerate(frames):
-                if index:
-                    target.writeframes(silence)
-                target.writeframes(chunk)
-        return True
-    except (wave.Error, OSError):
-        logger.exception("Could not combine scene WAV files: %s", output_path)
-        return False
-
-
 @router.post("/projects/{project_id}/audio/generate")
 async def generate_project_audio(
     project_id: int,
     payload: AudioGenerateRequest,
     db: Session = Depends(get_db),
 ):
-    """Generate all screenplay dialogue/narration segments, one at a time."""
+    """Prepare per-speaker voice assignments and start/resume checkpointed audio."""
     project = get_project_or_404(project_id, db)
     if not project.screenplay_json:
-        raise HTTPException(
-            status_code=400,
-            detail="Generate the screenplay before generating audio.",
-        )
+        raise HTTPException(status_code=400, detail="Generate the screenplay before generating audio.")
 
     stage = get_stage(project, "audio")
     if not stage:
         raise HTTPException(status_code=500, detail="Audio production stage is missing.")
-    if stage.status == StageStatus.running:
+    if audio_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
 
     screenplay = json.loads(project.screenplay_json)
@@ -519,108 +493,146 @@ async def generate_project_audio(
             detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}",
         ) from exc
 
-    profile = next((item for item in profiles if item.get("id") == payload.profile_id), None)
-    if not profile:
-        raise HTTPException(status_code=400, detail="The selected Voicebox voice profile was not found.")
-
-    audio_root = Path(project.project_path) / "audio"
-    audio_root.mkdir(parents=True, exist_ok=True)
-    stage.status = StageStatus.running
-    stage.detail = f"Generating audio with Voicebox profile '{profile.get('name', payload.profile_id)}'..."
-    db.commit()
-
-    manifest = {
-        "provider": "voicebox",
-        "profile_id": payload.profile_id,
-        "profile_name": profile.get("name", payload.profile_id),
-        "engine": payload.engine,
-        "language": VoiceboxTTSProvider.language_code(project.language),
-        "scenes": [],
-    }
-
-    try:
-        for scene_index, scene in enumerate(scenes, start=1):
-            scene_id = str(scene.get("scene_id") or f"SCENE_{scene_index:03d}")
-            safe_scene_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in scene_id)
-            scene_dir = audio_root / safe_scene_id
-            scene_dir.mkdir(parents=True, exist_ok=True)
-            scene_segments = []
-            wav_paths = []
-
-            for segment_index, segment in enumerate(scene.get("dialogue_and_narration") or [], start=1):
-                text_value = str(segment.get("text") or "").strip()
-                if not text_value:
-                    continue
-
-                speaker = str(segment.get("speaker") or "NARRATOR")
-                safe_speaker = "".join(c if c.isalnum() or c in "-_" else "_" for c in speaker)
-                filename = f"segment_{segment_index:03d}_{safe_speaker}.wav"
-                output_path = scene_dir / filename
-
-                audio_bytes = await voicebox.synthesize_bytes(
-                    text=text_value,
-                    profile_id=payload.profile_id,
-                    language=project.language,
-                    engine=payload.engine,
-                )
-                output_path.write_bytes(audio_bytes)
-                wav_paths.append(output_path)
-                scene_segments.append({
-                    "segment_id": segment.get("segment_id") or f"SEG_{segment_index:03d}",
-                    "speaker": speaker,
-                    "kind": segment.get("kind"),
-                    "text": text_value,
-                    "audio": f"audio/{safe_scene_id}/{filename}".replace("\\\\", "/"),
-                })
-
-            combined_name = f"{safe_scene_id}.wav"
-            combined_path = audio_root / combined_name
-            combined_ok = _combine_scene_wavs(wav_paths, combined_path)
-            manifest["scenes"].append({
-                "scene_id": scene_id,
-                "audio": f"audio/{combined_name}" if combined_ok else None,
-                "segments": scene_segments,
-            })
-            stage.detail = (
-                f"Voicebox audio: completed scene {scene_index} of {len(scenes)} "
-                f"({len(scene_segments)} spoken segments)."
-            )
-            db.commit()
-
-        manifest_path = audio_root / "audio_manifest.json"
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+    speakers = required_speakers(screenplay)
+    required_ids = [item["id"] for item in speakers]
+    missing = [speaker_id for speaker_id in required_ids if not payload.voice_assignments.get(speaker_id)]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="Select a voice profile for every character and the narrator: " + ", ".join(missing),
         )
-        stage.status = StageStatus.completed
-        stage.detail = (
-            f"Audio generated for {len(manifest['scenes'])} scenes using "
-            f"Voicebox profile '{profile.get('name', payload.profile_id)}'."
-        )
-        db.commit()
-        return {
-            "ok": True,
-            "message": stage.detail,
-            "manifest": manifest,
+
+    profile_map = {str(item.get("id")): item for item in profiles}
+    invalid_profiles = sorted({
+        profile_id for profile_id in payload.voice_assignments.values()
+        if profile_id not in profile_map
+    })
+    if invalid_profiles:
+        raise HTTPException(status_code=400, detail="One or more selected Voicebox profiles are unavailable.")
+
+    project_path = Path(project.project_path)
+    existing = read_manifest(project_path)
+    new_segments = _flatten(screenplay)
+    same_queue = bool(
+        existing
+        and [
+            (x.get("scene_id"), x.get("segment_id"), x.get("speaker"), x.get("text"))
+            for x in existing.get("segments", [])
+        ] == [
+            (x.get("scene_id"), x.get("segment_id"), x.get("speaker"), x.get("text"))
+            for x in new_segments
+        ]
+    )
+
+    if same_queue:
+        manifest = existing
+        old_assignments = manifest.get("voice_assignments") or []
+        completed_ids = {
+            (x.get("scene_id"), x.get("segment_id"), x.get("speaker"))
+            for x in manifest.get("segments", [])
+            if x.get("status") == "completed"
+        }
+        for item in manifest["segments"]:
+            if (item.get("scene_id"), item.get("segment_id"), item.get("speaker")) in completed_ids:
+                continue
+            item["status"] = "pending"
+    else:
+        manifest = {
+            "provider": "voicebox",
+            "segments": new_segments,
+            "scenes": [],
+            "completed": 0,
+            "next_segment_index": 0,
         }
 
-    except Exception as exc:
-        logger.exception("Project audio generation failed for project %s", project_id)
-        manifest["error"] = str(exc)
-        (audio_root / "audio_manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        stage.status = StageStatus.failed
-        stage.detail = f"Audio generation failed: {exc}"
-        db.commit()
-        raise HTTPException(status_code=502, detail=stage.detail) from exc
+    manifest["voice_assignments"] = [
+        {
+            "speaker_id": speaker["id"],
+            "speaker_name": speaker["name"],
+            "kind": speaker["kind"],
+            "profile_id": payload.voice_assignments[speaker["id"]],
+            "profile_name": profile_map[payload.voice_assignments[speaker["id"]]].get("name", payload.voice_assignments[speaker["id"]]),
+        }
+        for speaker in speakers
+    ]
+    manifest["engine"] = payload.engine
+    manifest["language"] = project.language
+    manifest["total"] = len(manifest["segments"])
+    manifest["completed"] = sum(x.get("status") == "completed" for x in manifest["segments"])
+    manifest["error"] = None
+    manifest["detail"] = "Audio generation queued."
+    write_manifest(project_path, manifest)
+
+    if not start_audio_worker(project_id, project_path, project.language, payload.engine):
+        raise HTTPException(status_code=409, detail="Audio generation is already running.")
+    return {
+        "ok": True,
+        "status": "running",
+        "message": "Audio generation started. It will continue in the background.",
+        "total": manifest["total"],
+        "completed": manifest["completed"],
+    }
+
+
+@router.post("/projects/{project_id}/audio/control/{command}")
+def control_project_audio(
+    project_id: int,
+    command: str,
+    db: Session = Depends(get_db),
+):
+    project = get_project_or_404(project_id, db)
+    if command not in {"pause", "stop"}:
+        raise HTTPException(status_code=400, detail="Command must be 'pause' or 'stop'.")
+    try:
+        status = request_audio_control(project_id, Path(project.project_path), command)
+        return {"ok": True, "status": status, "message": "Control request accepted. The current segment will finish first."}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/audio/resume")
+def resume_project_audio(
+    project_id: int,
+    db: Session = Depends(get_db),
+):
+    project = get_project_or_404(project_id, db)
+    project_path = Path(project.project_path)
+    manifest = read_manifest(project_path)
+    if not manifest:
+        raise HTTPException(status_code=404, detail="No audio checkpoint exists. Configure voices and generate audio first.")
+    if audio_worker_active(project_id):
+        raise HTTPException(status_code=409, detail="Audio generation is already running.")
+    if manifest.get("status") == "completed":
+        return {"ok": True, "status": "completed", "message": "All audio segments are already completed."}
+
+    engine = manifest.get("engine") or settings.voicebox_engine
+    if not start_audio_worker(project_id, project_path, project.language, engine):
+        raise HTTPException(status_code=409, detail="Audio generation is already running.")
+    return {
+        "ok": True,
+        "status": "running",
+        "message": "Resuming from the first unfinished audio segment.",
+        "completed": manifest.get("completed", 0),
+        "total": manifest.get("total", len(manifest.get("segments") or [])),
+    }
 
 
 @router.get("/projects/{project_id}/audio")
 def get_project_audio(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
-    manifest_path = Path(project.project_path) / "audio" / "audio_manifest.json"
-    if not manifest_path.is_file():
-        raise HTTPException(status_code=404, detail="No audio manifest has been generated yet.")
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = read_manifest(Path(project.project_path))
+    if not manifest:
+        raise HTTPException(status_code=404, detail="No audio checkpoint has been created yet.")
+
+    # A server restart may interrupt a worker between segments. The checkpoint is
+    # authoritative; the next Resume starts at the first unfinished segment.
+    if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not audio_worker_active(project_id):
+        manifest["status"] = "paused"
+        manifest["detail"] = "Server restarted; safely paused at the last completed segment. Resume to continue."
+        write_manifest(Path(project.project_path), manifest)
+        stage = get_stage(project, "audio")
+        if stage:
+            stage.status = StageStatus.paused
+            stage.detail = manifest["detail"]
+            db.commit()
+    return manifest
