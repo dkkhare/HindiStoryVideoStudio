@@ -642,3 +642,147 @@ def get_project_audio(project_id: int, db: Session = Depends(get_db)):
             stage.detail = manifest["detail"]
             db.commit()
     return manifest
+
+
+
+@router.post("/projects/{project_id}/video/generate")
+async def generate_project_video(
+    project_id: int,
+    db: Session = Depends(get_db),
+):
+    """Queue scene-by-scene LTX video generation on the Kaggle ComfyUI server."""
+    project = get_project_or_404(project_id, db)
+    if not project.screenplay_json:
+        raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
+    if not settings.comfyui_api_key:
+        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
+    if not settings.comfyui_base_url:
+        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
+    if video_worker_active(project_id):
+        raise HTTPException(status_code=409, detail="Video generation is already running.")
+
+    image_stage = get_stage(project, "scene_images")
+    audio_stage = get_stage(project, "audio")
+    video_stage = get_stage(project, "video")
+    if not image_stage or image_stage.status != StageStatus.completed:
+        raise HTTPException(status_code=400, detail="Generate all scene images first.")
+    if not audio_stage or audio_stage.status != StageStatus.completed:
+        raise HTTPException(status_code=400, detail="Complete scene audio generation first.")
+    if not video_stage:
+        raise HTTPException(status_code=500, detail="Video production stage is missing.")
+
+    project_path = Path(project.project_path)
+    existing = read_video_manifest(project_path)
+    scenes = json.loads(project.screenplay_json).get("scenes") or []
+    if not scenes:
+        raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
+
+    if existing and existing.get("scenes"):
+        records = {str(item.get("scene_id")): item for item in existing["scenes"]}
+    else:
+        records = {}
+    scene_records = [
+        records.get(str(scene.get("scene_id")), {
+            "scene_id": str(scene.get("scene_id")),
+            "status": "pending",
+            "video": f"video/{str(scene.get('scene_id')).replace('/', '_')}.mp4",
+        })
+        for scene in scenes
+    ]
+    manifest = {
+        "version": 1,
+        "provider": "kaggle_comfyui",
+        "status": "running",
+        "detail": "Video generation queued.",
+        "total": len(scenes),
+        "completed": sum(item.get("status") == "completed" for item in scene_records),
+        "current": None,
+        "error": None,
+        "scenes": scene_records,
+    }
+    write_video_manifest(project_path, manifest)
+    video_stage.status = StageStatus.running
+    video_stage.detail = "Scene video generation queued on Kaggle ComfyUI."
+    db.commit()
+
+    if not start_video_worker(project_id, project_path, json.loads(project.screenplay_json)):
+        raise HTTPException(status_code=409, detail="Video generation is already running.")
+    return {
+        "ok": True,
+        "status": "running",
+        "message": "Scene video generation started on Kaggle.",
+        "total": len(scenes),
+        "completed": manifest["completed"],
+    }
+
+
+@router.get("/projects/{project_id}/video")
+def get_project_video(project_id: int, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    manifest = read_video_manifest(Path(project.project_path))
+    if not manifest:
+        raise HTTPException(status_code=404, detail="No video generation manifest exists yet.")
+
+    if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not video_worker_active(project_id):
+        manifest["status"] = "paused"
+        manifest["detail"] = "Studio restarted; safely paused at the last completed scene. Resume to continue."
+        write_video_manifest(Path(project.project_path), manifest)
+        stage = get_stage(project, "video")
+        if stage:
+            stage.status = StageStatus.paused
+            stage.detail = manifest["detail"]
+            db.commit()
+    return manifest
+
+
+@router.post("/projects/{project_id}/video/control/{command}")
+def control_project_video(
+    project_id: int,
+    command: str,
+    db: Session = Depends(get_db),
+):
+    project = get_project_or_404(project_id, db)
+    if command not in {"pause", "stop"}:
+        raise HTTPException(status_code=400, detail="Command must be 'pause' or 'stop'.")
+    try:
+        status = request_video_control(project_id, Path(project.project_path), command)
+        return {
+            "ok": True,
+            "status": status,
+            "message": "Control request accepted. The current scene clip will finish first.",
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/video/resume")
+def resume_project_video(
+    project_id: int,
+    db: Session = Depends(get_db),
+):
+    project = get_project_or_404(project_id, db)
+    if not settings.comfyui_api_key:
+        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
+    manifest = read_video_manifest(Path(project.project_path))
+    if not manifest:
+        raise HTTPException(status_code=404, detail="No video checkpoint exists. Start video generation first.")
+    if video_worker_active(project_id):
+        raise HTTPException(status_code=409, detail="Video generation is already running.")
+    if manifest.get("status") == "completed":
+        return {"ok": True, "status": "completed", "message": "All scene videos are already completed."}
+    if not project.screenplay_json:
+        raise HTTPException(status_code=400, detail="The screenplay is missing.")
+    if not start_video_worker(project_id, Path(project.project_path), json.loads(project.screenplay_json)):
+        raise HTTPException(status_code=409, detail="Video generation is already running.")
+    stage = get_stage(project, "video")
+    if stage:
+        stage.status = StageStatus.running
+        stage.detail = "Resuming scene video generation from the last checkpoint."
+        db.commit()
+    return {
+        "ok": True,
+        "status": "running",
+        "message": "Resuming from the first unfinished scene.",
+        "completed": manifest.get("completed", 0),
+        "total": manifest.get("total", 0),
+    }
