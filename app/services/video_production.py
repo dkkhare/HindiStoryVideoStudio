@@ -70,6 +70,8 @@ def video_worker_active(project_id: int) -> bool:
 
 
 class KaggleComfyClient:
+    """Client for the Kaggle server's asynchronous /jobs API."""
+
     def __init__(self):
         self.base = settings.comfyui_base_url.rstrip("/")
         self.api_key = settings.comfyui_api_key.strip()
@@ -79,112 +81,90 @@ class KaggleComfyClient:
             raise RuntimeError("COMFYUI_API_KEY is not configured in the local .env file.")
         self.headers = {"X-API-Key": self.api_key}
 
-    async def upload_input(self, client: httpx.AsyncClient, path: Path, remote_name: str) -> str:
-        # ComfyUI's upload/image endpoint stores files in its input directory.
-        # LoadAudio reads WAV files from the same input directory.
-        with path.open("rb") as stream:
+    async def submit_job(
+        self,
+        client: httpx.AsyncClient,
+        image_path: Path,
+        audio_path: Path,
+        prompt: str,
+    ) -> str:
+        # The Kaggle wrapper accepts the selected server-side workflow and media
+        # directly. Omitting "workflow" intentionally uses the server default,
+        # which is the workflow configured in the user's Kaggle environment.
+        data = {"prompt": prompt}
+        with image_path.open("rb") as image_stream, audio_path.open("rb") as audio_stream:
             response = await client.post(
-                f"{self.base}/upload/image",
+                f"{self.base}/jobs",
                 headers=self.headers,
-                data={"type": "input", "overwrite": "true"},
-                files={"image": (remote_name, stream, "application/octet-stream")},
+                data=data,
+                files={
+                    "audio": (audio_path.name, audio_stream, "audio/wav"),
+                    "image": (image_path.name, image_stream, "image/png"),
+                },
+                timeout=300.0,
             )
         response.raise_for_status()
-        data = response.json()
-        name = str(data.get("name") or remote_name)
-        subfolder = str(data.get("subfolder") or "").strip("/")
-        return f"{subfolder}/{name}" if subfolder else name
+        payload = response.json()
+        job_id = payload.get("job_id")
+        if not job_id:
+            raise RuntimeError(f"Kaggle video API did not return job_id: {payload}")
+        return str(job_id)
 
-    async def queue(self, client: httpx.AsyncClient, workflow: dict) -> str:
-        response = await client.post(
-            f"{self.base}/prompt",
-            headers=self.headers,
-            json={"prompt": workflow, "client_id": settings.comfyui_client_id},
-        )
-        response.raise_for_status()
-        data = response.json()
-        prompt_id = data.get("prompt_id")
-        if not prompt_id:
-            raise RuntimeError(f"ComfyUI did not return prompt_id: {data}")
-        return str(prompt_id)
-
-    async def wait_for_video(self, client: httpx.AsyncClient, prompt_id: str) -> dict:
+    async def wait_for_video(self, client: httpx.AsyncClient, job_id: str) -> dict:
         timeout_seconds = max(900, int(settings.comfyui_request_timeout_seconds))
         deadline = asyncio.get_running_loop().time() + timeout_seconds
+        failures = 0
         while asyncio.get_running_loop().time() < deadline:
-            response = await client.get(
-                f"{self.base}/history/{prompt_id}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            history = response.json()
-            record = history.get(prompt_id) if isinstance(history, dict) else None
-            if record:
-                status = record.get("status") or {}
-                if status.get("completed") or str(status.get("status_str") or "").lower() == "success":
-                    return record
-                status_text = str(status.get("status_str") or "").lower()
-                if status_text in {"error", "failed"}:
-                    raise RuntimeError(f"ComfyUI execution failed: {status}")
+            try:
+                response = await client.get(
+                    f"{self.base}/jobs/{job_id}",
+                    headers=self.headers,
+                    timeout=60.0,
+                )
+                response.raise_for_status()
+                status = response.json()
+                failures = 0
+            except (httpx.HTTPError, ValueError) as exc:
+                failures += 1
+                if failures > 30:
+                    raise RuntimeError(f"Lost connection to Kaggle while checking job {job_id}: {exc}") from exc
+                await asyncio.sleep(5)
+                continue
+
+            state = str(status.get("status") or "").lower()
+            detail = status.get("stage") or state
+            progress = status.get("progress")
+            logger.info("Kaggle job %s: %s; stage=%s; progress=%s", job_id, state, detail, progress)
+            if state == "done":
+                return status
+            if state == "error":
+                raise RuntimeError(f"Kaggle video generation failed: {status.get('error') or status}")
             await asyncio.sleep(5)
-        raise TimeoutError(f"ComfyUI job {prompt_id} did not finish within {timeout_seconds} seconds.")
+        raise TimeoutError(f"Kaggle video job {job_id} did not finish within {timeout_seconds} seconds.")
 
-    @staticmethod
-    def find_video_file(record: dict) -> dict:
-        outputs = record.get("outputs") or {}
-        candidates = []
-        def walk(value):
-            if isinstance(value, dict):
-                if value.get("filename"):
-                    filename = str(value["filename"])
-                    if Path(filename).suffix.lower() in {".mp4", ".webm", ".mov", ".mkv"}:
-                        candidates.append(value)
-                for child in value.values():
-                    walk(child)
-            elif isinstance(value, list):
-                for child in value:
-                    walk(child)
-        walk(outputs)
-        if not candidates:
-            raise RuntimeError(
-                "ComfyUI completed, but no video file was found in its output. "
-                "Check that Video Combine node 400 saves an MP4."
-            )
-        return candidates[-1]
-
-    async def download_video(self, client: httpx.AsyncClient, file_info: dict, destination: Path) -> None:
-        response = await client.get(
-            f"{self.base}/view",
-            headers=self.headers,
-            params={
-                "filename": file_info["filename"],
-                "subfolder": file_info.get("subfolder") or "",
-                "type": file_info.get("type") or "output",
-            },
-        )
-        response.raise_for_status()
-        if len(response.content) < 1024:
-            raise RuntimeError("ComfyUI returned an unexpectedly small video file.")
+    async def download_video(self, client: httpx.AsyncClient, job_id: str, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temp = destination.with_suffix(destination.suffix + ".tmp")
-        temp.write_bytes(response.content)
-        temp.replace(destination)
-
-
-def _load_workflow() -> dict:
-    path = Path(settings.comfyui_workflow_json)
-    if not path.is_file():
-        raise FileNotFoundError(f"ComfyUI API workflow not found: {path}")
-    workflow = json.loads(path.read_text(encoding="utf-8"))
-    required = (IMAGE_NODE, AUDIO_NODE, PROMPT_NODE, DURATION_NODE, FPS_NODE, VIDEO_OUTPUT_NODE)
-    missing = [node for node in required if node not in workflow]
-    if missing:
-        raise ValueError("LTX workflow is missing required node IDs: " + ", ".join(missing))
-    return workflow
-
-
-def _set_input(workflow: dict, node_id: str, name: str, value: Any) -> None:
-    workflow[node_id].setdefault("inputs", {})[name] = value
+        try:
+            async with client.stream(
+                "GET",
+                f"{self.base}/jobs/{job_id}/video",
+                headers=self.headers,
+                timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0),
+            ) as response:
+                response.raise_for_status()
+                written = 0
+                with temp.open("wb") as output:
+                    async for chunk in response.aiter_bytes(1024 * 1024):
+                        if chunk:
+                            output.write(chunk)
+                            written += len(chunk)
+            if written < 1024:
+                raise RuntimeError("Kaggle returned an unexpectedly small video file.")
+            temp.replace(destination)
+        except Exception:
+            temp.unlink(missing_ok=True)
+            raise
 
 
 def _scene_prompt(scene: dict, screenplay: dict) -> str:
@@ -294,21 +274,13 @@ async def _run_worker(project_id: int, project_path: Path, screenplay: dict) -> 
                 audio_duration = _wav_duration(audio_path)
                 duration = float(scene.get("duration_seconds") or scene.get("duration") or audio_duration or duration_default)
                 duration = max(1.0, min(duration, 60.0))
-                workflow = _load_workflow()
-                suffix = uuid.uuid4().hex[:10]
-                remote_image = await client_config.upload_input(
-                    client, image_path, f"studio_p{project_id}_{_safe(scene_id)}_{suffix}.png"
+                job_id = await client_config.submit_job(
+                    client,
+                    image_path,
+                    audio_path,
+                    _scene_prompt(scene, screenplay),
                 )
-                remote_audio = await client_config.upload_input(
-                    client, audio_path, f"studio_p{project_id}_{_safe(scene_id)}_{suffix}.wav"
-                )
-                _set_input(workflow, IMAGE_NODE, "image", remote_image)
-                _set_input(workflow, AUDIO_NODE, "audio", remote_audio)
-                _set_input(workflow, PROMPT_NODE, "value", _scene_prompt(scene, screenplay))
-                _set_input(workflow, DURATION_NODE, "value", float(duration))
-                _set_input(workflow, FPS_NODE, "value", fps)
-                _set_input(workflow, VIDEO_OUTPUT_NODE, "filename_prefix", f"studio/project_{project_id}/{_safe(scene_id)}")
-                record.update(status="running", prompt_id=None, duration_seconds=duration, fps=fps)
+                record.update(status="running", job_id=None, duration_seconds=duration, fps=fps)
                 manifest.update(
                     status="running",
                     current={"index": index, "total": len(scenes), "scene_id": scene_id},
@@ -316,19 +288,16 @@ async def _run_worker(project_id: int, project_path: Path, screenplay: dict) -> 
                     detail=f"Uploading inputs and queueing {scene_id} on Kaggle ComfyUI.",
                 )
                 write_manifest(project_path, manifest)
-                prompt_id = await client_config.queue(client, workflow)
-                record["prompt_id"] = prompt_id
-                manifest["detail"] = f"Generating {scene_id} on Kaggle (ComfyUI job {prompt_id})."
+                record["job_id"] = job_id
+                manifest["detail"] = f"Generating {scene_id} on Kaggle (job {job_id})."
                 write_manifest(project_path, manifest)
-                history_record = await client_config.wait_for_video(client, prompt_id)
-                file_info = client_config.find_video_file(history_record)
-                await client_config.download_video(client, file_info, destination)
+                await client_config.wait_for_video(client, job_id)
+                await client_config.download_video(client, job_id, destination)
                 if not _valid_video(destination):
                     raise RuntimeError(f"Downloaded video for {scene_id} is invalid.")
                 record.update(
                     status="completed",
-                    source_file=file_info.get("filename"),
-                    prompt_id=prompt_id,
+                    job_id=job_id,
                     size_bytes=destination.stat().st_size,
                 )
                 record.pop("error", None)
