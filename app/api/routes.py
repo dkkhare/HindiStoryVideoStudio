@@ -526,16 +526,19 @@ async def generate_project_audio(
 
     if same_queue:
         manifest = existing
-        old_assignments = manifest.get("voice_assignments") or []
-        completed_ids = {
-            (x.get("scene_id"), x.get("segment_id"), x.get("speaker"))
-            for x in manifest.get("segments", [])
-            if x.get("status") == "completed"
+        old_assignment_map = {
+            item.get("speaker_id"): item.get("profile_id")
+            for item in (manifest.get("voice_assignments") or [])
         }
         for item in manifest["segments"]:
-            if (item.get("scene_id"), item.get("segment_id"), item.get("speaker")) in completed_ids:
-                continue
-            item["status"] = "pending"
+            old_profile = old_assignment_map.get(item.get("speaker"))
+            new_profile = payload.voice_assignments.get(item.get("speaker"))
+            if old_profile != new_profile:
+                old_audio = project_path / item.get("audio", "")
+                old_audio.unlink(missing_ok=True)
+                item["status"] = "pending"
+                item.pop("profile_id", None)
+                item.pop("error", None)
     else:
         manifest = {
             "provider": "voicebox",
@@ -591,7 +594,7 @@ def control_project_audio(
 
 
 @router.post("/projects/{project_id}/audio/resume")
-def resume_project_audio(
+async def resume_project_audio(
     project_id: int,
     db: Session = Depends(get_db),
 ):
