@@ -25,7 +25,7 @@ VIDEO_OUTPUT_NODE = "400"
 
 
 def _safe(value: str) -> str:
-    return re.sub(r"[^\\w.-]+", "_", str(value), flags=re.UNICODE).strip("._")[:90] or "scene"
+    return re.sub(r"[^\w.-]+", "_", str(value), flags=re.UNICODE).strip("._")[:90] or "scene"
 
 
 def manifest_path(project_path: Path) -> Path:
