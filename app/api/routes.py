@@ -513,6 +513,8 @@ async def generate_project_audio(
     project_path = Path(project.project_path)
     existing = read_manifest(project_path)
     new_segments = _flatten(screenplay)
+    if not new_segments:
+        raise HTTPException(status_code=400, detail="The screenplay has no non-empty dialogue or narration segments.")
     same_queue = bool(
         existing
         and [
