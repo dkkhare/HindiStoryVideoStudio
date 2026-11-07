@@ -563,6 +563,7 @@ async def generate_project_audio(
     manifest["total"] = len(manifest["segments"])
     manifest["completed"] = sum(x.get("status") == "completed" for x in manifest["segments"])
     manifest["error"] = None
+    manifest["status"] = "running"
     manifest["detail"] = "Audio generation queued."
     write_manifest(project_path, manifest)
 
