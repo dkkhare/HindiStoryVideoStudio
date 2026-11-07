@@ -216,11 +216,14 @@ async function renderProject(project) {
                 }
 
                 if (scenes.status === "completed") {
-                    setMessage(
-                        workflow,
-                        "Scene images completed successfully."
-                    );
-
+                    if (audio?.status === "completed") {
+                        await renderVideoStage(workflow, project, status.video);
+                    } else {
+                        setMessage(
+                            workflow,
+                            "Scene images are ready. Complete scene audio to enable video generation."
+                        );
+                    }
                     return;
                 }
             }
@@ -520,6 +523,104 @@ async function renderAudioStage(workflow, project, audioStage) {
 }
 
 
+
+async function renderVideoStage(workflow, project, videoStage) {
+    const panel = document.createElement("div");
+    panel.className = "video-stage";
+    panel.dataset.projectId = project.id;
+    const heading = document.createElement("h4");
+    heading.textContent = "Video Production · Kaggle LTX";
+    panel.appendChild(heading);
+
+    let manifest = null;
+    try {
+        manifest = await api(`/api/projects/${project.id}/video`).catch(() => null);
+    } catch (_) {
+        manifest = null;
+    }
+
+    const status = manifest?.status || videoStage?.status || "pending";
+    panel.dataset.videoStatus = status;
+    const active = ["running", "pause_requested", "stop_requested"];
+    if (active.includes(status)) audioPollingEnabled = true;
+
+    const detail = document.createElement("p");
+    detail.className = "message";
+    detail.dataset.role = "video-detail";
+    detail.textContent = manifest?.detail || videoStage?.detail ||
+        "Generate one LTX clip per scene using its approved image and combined audio.";
+    panel.appendChild(detail);
+
+    const progress = document.createElement("p");
+    progress.dataset.role = "video-progress";
+    const completed = Number(manifest?.completed || 0);
+    const total = Number(manifest?.total || manifest?.scenes?.length || 0);
+    progress.textContent = total ? `Progress: ${completed} / ${total} scenes` : "Progress: waiting to start";
+    panel.appendChild(progress);
+
+    const current = document.createElement("p");
+    current.dataset.role = "video-current";
+    if (manifest?.current) {
+        current.textContent = `Current scene: ${manifest.current.scene_id}`;
+    } else {
+        current.hidden = true;
+    }
+    panel.appendChild(current);
+
+    const error = document.createElement("p");
+    error.className = "message";
+    error.dataset.role = "video-error";
+    error.textContent = manifest?.error || "";
+    error.hidden = !manifest?.error;
+    panel.appendChild(error);
+
+    const controls = document.createElement("div");
+    controls.className = "audio-controls";
+    panel.appendChild(controls);
+
+    const addControl = (label, endpoint, cssClass) => {
+        const button = createButton(label, async btn => {
+            btn.disabled = true;
+            try {
+                await api(`/api/projects/${project.id}/video/${endpoint}`, { method: "POST" });
+                await loadProjects();
+            } catch (err) {
+                btn.disabled = false;
+                setMessage(panel, err.message);
+            }
+        });
+        if (cssClass) button.className = cssClass;
+        controls.appendChild(button);
+    };
+
+    if (active.includes(status)) {
+        addControl(status === "running" ? "Pause after current clip" : "Pause requested…", "control/pause", "secondary");
+        addControl(status === "running" ? "Stop after current clip" : "Stop requested…", "control/stop", "danger");
+    } else if (status === "paused" || status === "stopped" || status === "failed") {
+        addControl("Resume from checkpoint", "resume", "secondary");
+        addControl("Regenerate / Continue Videos", "generate", "");
+    } else if (status !== "completed") {
+        addControl("Generate Scene Videos", "generate", "");
+    }
+
+    for (const scene of (manifest?.scenes || [])) {
+        if (scene.status !== "completed" || !scene.video) continue;
+        const section = document.createElement("div");
+        section.className = "video-scene";
+        const title = document.createElement("p");
+        title.textContent = scene.scene_id;
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "none";
+        video.src = `/api/projects/${project.id}/assets/${scene.video}`;
+        video.style.width = "100%";
+        video.style.maxWidth = "640px";
+        section.append(title, video);
+        panel.appendChild(section);
+    }
+    workflow.appendChild(panel);
+}
+
 // Poll only the audio manifest. Keep project cards, voice selectors and controls
 // mounted while a segment is being generated.
 let audioPollInFlight = false;
@@ -534,7 +635,8 @@ setInterval(async () => {
     }
 
     const panels = Array.from(document.querySelectorAll(".audio-stage"));
-    if (!panels.length) {
+    const videoPanels = Array.from(document.querySelectorAll(".video-stage"));
+    if (!panels.length && !videoPanels.length) {
         audioPollingEnabled = false;
         return;
     }
@@ -606,11 +708,39 @@ setInterval(async () => {
             }
         }
 
-        audioPollingEnabled = panels.some(panel =>
-            ["running", "pause_requested", "stop_requested"].includes(
-                panel.dataset.audioStatus
-            )
-        );
+        for (const panel of videoPanels) {
+            const projectId = panel.dataset.projectId;
+            if (!projectId) continue;
+            const manifest = await api(`/api/projects/${projectId}/video`).catch(() => null);
+            if (!manifest) continue;
+
+            const detail = panel.querySelector('[data-role="video-detail"]');
+            const progress = panel.querySelector('[data-role="video-progress"]');
+            const current = panel.querySelector('[data-role="video-current"]');
+            const error = panel.querySelector('[data-role="video-error"]');
+            if (detail) detail.textContent = manifest.detail || manifest.status || "";
+            if (progress) progress.textContent = `Progress: ${Number(manifest.completed || 0)} / ${Number(manifest.total || 0)} scenes`;
+            if (current) {
+                current.textContent = manifest.current ? `Current scene: ${manifest.current.scene_id}` : "";
+                current.hidden = !manifest.current;
+            }
+            if (error) {
+                error.textContent = manifest.error || "";
+                error.hidden = !manifest.error;
+            }
+            const previousStatus = panel.dataset.videoStatus;
+            const nextStatus = manifest.status || previousStatus;
+            panel.dataset.videoStatus = nextStatus;
+            if (["running", "pause_requested", "stop_requested"].includes(previousStatus) &&
+                !["running", "pause_requested", "stop_requested"].includes(nextStatus)) {
+                await loadProjects();
+                return;
+            }
+        }
+
+        audioPollingEnabled =
+            panels.some(panel => ["running", "pause_requested", "stop_requested"].includes(panel.dataset.audioStatus)) ||
+            videoPanels.some(panel => ["running", "pause_requested", "stop_requested"].includes(panel.dataset.videoStatus));
     } catch (error) {
         console.error("Audio status polling error:", error);
     } finally {
