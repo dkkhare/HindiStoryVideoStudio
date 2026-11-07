@@ -281,3 +281,8 @@ def request_audio_control(project_id: int, project_path: Path, command: str) -> 
         manifest["detail"],
     )
     return final_status
+
+
+def audio_worker_active(project_id: int) -> bool:
+    task = _TASKS.get(project_id)
+    return bool(task and not task.done())
