@@ -147,6 +147,22 @@ async def _run_worker(
 
     try:
         for index, item in enumerate(segments):
+            command = _CONTROLS.pop(project_id, None)
+            if command in {"pause", "stop"}:
+                manifest["status"] = "paused" if command == "pause" else "stopped"
+                manifest["detail"] = (
+                    "Paused at a safe segment boundary."
+                    if command == "pause"
+                    else "Stopped at a safe segment boundary. Completed audio is preserved."
+                )
+                manifest["current"] = None
+                write_manifest(project_path, manifest)
+                _set_stage(
+                    project_id,
+                    StageStatus.paused if command == "pause" else StageStatus.stopped,
+                    manifest["detail"],
+                )
+                return
             path = project_path / item["audio"]
             if item.get("status") == "completed" and _valid_wav(path):
                 continue
