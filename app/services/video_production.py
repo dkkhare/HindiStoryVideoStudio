@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import uuid
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -200,6 +201,14 @@ def _scene_prompt(scene: dict, screenplay: dict) -> str:
     return f"{identity}\\n\\nFILM: {screenplay.get('title', '')}\\nSCENE: {scene.get('scene_id', '')}\\n{prompt}"
 
 
+
+def _wav_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as wav_file:
+        rate = wav_file.getframerate()
+        if rate <= 0:
+            raise ValueError(f"Invalid WAV sample rate: {path}")
+        return wav_file.getnframes() / float(rate)
+
 def _valid_video(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 1024
 
@@ -280,8 +289,7 @@ async def _run_worker(project_id: int, project_path: Path, screenplay: dict) -> 
                 except ValueError as exc:
                     raise RuntimeError(f"Invalid media path in manifest for {scene_id}") from exc
 
-                duration = int(scene.get("duration_seconds") or scene.get("duration") or duration_default)
-                duration = max(1, min(duration, 60))
+                # Match the generated clip length to the scene audio unless the screenplay\n                # explicitly supplies a duration. This prevents trimming longer dialogue.\n                audio_duration = _wav_duration(audio_path)\n                duration = float(scene.get("duration_seconds") or scene.get("duration") or audio_duration or duration_default)\n                duration = max(1.0, min(duration, 60.0))
                 workflow = _load_workflow()
                 suffix = uuid.uuid4().hex[:10]
                 remote_image = await client_config.upload_input(
