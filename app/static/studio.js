@@ -2,14 +2,22 @@
 const form = document.getElementById("project-form");
 const message = document.getElementById("message");
 const list = document.getElementById("projects");
+
 let audioPollingEnabled = false;
+let audioPollInFlight = false;
+
+const ACTIVE_STATUSES = [
+    "running",
+    "pause_requested",
+    "stop_requested"
+];
 
 async function api(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-        throw new Error(data.detail || "Request failed");
+        throw new Error(data.detail || data.message || "Request failed");
     }
 
     return data;
@@ -17,6 +25,7 @@ async function api(url, options = {}) {
 
 function createButton(label, handler) {
     const button = document.createElement("button");
+    button.type = "button";
     button.textContent = label;
     button.addEventListener("click", () => handler(button));
     return button;
@@ -29,7 +38,13 @@ function setMessage(container, text) {
     container.appendChild(p);
 }
 
+function isActive(status) {
+    return ACTIVE_STATUSES.includes(status);
+}
+
 async function loadProjects() {
+    if (!list) return;
+
     audioPollingEnabled = false;
     list.textContent = "Loading projects...";
 
@@ -37,7 +52,7 @@ async function loadProjects() {
         const projects = await api("/api/projects");
         list.innerHTML = "";
 
-        if (!projects.length) {
+        if (!Array.isArray(projects) || !projects.length) {
             list.textContent = "No projects yet. Create your first story above.";
             return;
         }
@@ -55,11 +70,11 @@ async function renderProject(project) {
     card.className = "project";
 
     const heading = document.createElement("h3");
-    heading.textContent = project.title;
+    heading.textContent = project.title || `Project ${project.id}`;
 
     const details = document.createElement("p");
     details.textContent =
-        `${project.target_duration_minutes} minutes · ${project.status}`;
+        `${project.target_duration_minutes || ""} minutes · ${project.status || ""}`;
 
     const workflow = document.createElement("div");
     workflow.className = "workflow";
@@ -78,9 +93,7 @@ async function renderProject(project) {
         const scenes = status.scene_images;
         const audio = status.audio;
 
-        if (!screenplay || screenplay.status === "pending" ||
-            screenplay.status === "failed") {
-
+        if (!screenplay || ["pending", "failed"].includes(screenplay.status)) {
             workflow.appendChild(createButton(
                 "Generate Screenplay",
                 button => runAction(
@@ -90,7 +103,6 @@ async function renderProject(project) {
                     "Generating screenplay..."
                 )
             ));
-
             return;
         }
 
@@ -112,14 +124,6 @@ async function renderProject(project) {
                             `/api/projects/${project.id}/screenplay`
                         );
 
-                        const pre = document.createElement("pre");
-                        pre.className = "screenplay-preview";
-                        pre.textContent = JSON.stringify(
-                            data.screenplay,
-                            null,
-                            2
-                        );
-
                         const existing = workflow.querySelector(
                             ".screenplay-preview"
                         );
@@ -128,6 +132,13 @@ async function renderProject(project) {
                             existing.remove();
                             button.textContent = "Review Screenplay";
                         } else {
+                            const pre = document.createElement("pre");
+                            pre.className = "screenplay-preview";
+                            pre.textContent = JSON.stringify(
+                                data.screenplay,
+                                null,
+                                2
+                            );
                             workflow.appendChild(pre);
                             button.textContent = "Hide Screenplay";
                         }
@@ -150,17 +161,13 @@ async function renderProject(project) {
                     "Approving screenplay..."
                 )
             ));
-
             return;
         }
 
         if (screenplay.status === "completed") {
-
             await renderAudioStage(workflow, project, audio);
 
-            if (!references || references.status === "pending" ||
-                references.status === "failed") {
-
+            if (!references || ["pending", "failed"].includes(references.status)) {
                 setMessage(
                     workflow,
                     "Screenplay approved. Next: Generate visual references."
@@ -175,7 +182,6 @@ async function renderProject(project) {
                         "Generating visual references..."
                     )
                 ));
-
                 return;
             }
 
@@ -188,10 +194,7 @@ async function renderProject(project) {
             }
 
             if (references.status === "completed") {
-
-                if (!scenes || scenes.status === "pending" ||
-                    scenes.status === "failed") {
-
+                if (!scenes || ["pending", "failed"].includes(scenes.status)) {
                     setMessage(
                         workflow,
                         "Visual references ready. Next: Generate scene images."
@@ -206,7 +209,6 @@ async function renderProject(project) {
                             "Generating scene images..."
                         )
                     ));
-
                     return;
                 }
 
@@ -245,54 +247,53 @@ async function runAction(button, projectId, endpoint, progressText) {
         await api(`/api/projects/${projectId}/${endpoint}`, {
             method: "POST"
         });
-
         await loadProjects();
-
     } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
 
         const card = button.closest(".project");
-        if (card) {
-            setMessage(card, error.message);
-        }
+        if (card) setMessage(card, error.message);
     }
 }
 
-form.addEventListener("submit", async event => {
-    event.preventDefault();
-    message.textContent = "Creating project...";
+if (form) {
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
 
-    const formData = new FormData(form);
-    const payload = Object.fromEntries(formData.entries());
+        if (message) message.textContent = "Creating project...";
 
-    payload.target_duration_minutes =
-        Number(payload.target_duration_minutes);
+        const formData = new FormData(form);
+        const payload = Object.fromEntries(formData.entries());
 
-    try {
-        const data = await api("/api/projects", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
+        payload.target_duration_minutes =
+            Number(payload.target_duration_minutes);
 
-        message.textContent = `Created project #${data.id}`;
-        form.reset();
-        await loadProjects();
+        try {
+            const data = await api("/api/projects", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
 
-    } catch (error) {
-        message.textContent = error.message;
-    }
-});
+            if (message) message.textContent = `Created project #${data.id}`;
 
-loadProjects();
+            form.reset();
+            await loadProjects();
 
+        } catch (error) {
+            if (message) message.textContent = error.message;
+        }
+    });
+}
 
+/* ---------------- AUDIO STAGE ---------------- */
 
 async function renderAudioStage(workflow, project, audioStage) {
     const panel = document.createElement("div");
     panel.className = "audio-stage";
     panel.dataset.projectId = project.id;
+
     const heading = document.createElement("h4");
     heading.textContent = "Audio Production · Voice Assignment";
     panel.appendChild(heading);
@@ -300,12 +301,17 @@ async function renderAudioStage(workflow, project, audioStage) {
     let screenplayData;
     let profiles;
     let manifest = null;
+
     try {
         [screenplayData, profiles] = await Promise.all([
             api(`/api/projects/${project.id}/screenplay`),
             api("/api/voicebox/profiles")
         ]);
-        manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
+
+        manifest = await api(
+            `/api/projects/${project.id}/audio`
+        ).catch(() => null);
+
     } catch (error) {
         setMessage(panel, `Audio setup unavailable: ${error.message}`);
         workflow.appendChild(panel);
@@ -314,18 +320,26 @@ async function renderAudioStage(workflow, project, audioStage) {
 
     const screenplay = screenplayData.screenplay || {};
     const characters = screenplay.characters || [];
+
     const speakers = characters.map(character => ({
         id: character.character_id,
         name: character.name || character.character_id,
         kind: "character"
     })).filter(item => item.id);
-    speakers.push({ id: "NARRATOR", name: "Narrator / Voice-over", kind: "narrator" });
+
+    speakers.push({
+        id: "NARRATOR",
+        name: "Narrator / Voice-over",
+        kind: "narrator"
+    });
 
     const hindiProfiles = profiles.filter(profile =>
         String(profile.language || "").toLowerCase() === "hi" ||
         String(profile.language || "").toLowerCase() === "hindi"
     );
+
     const available = hindiProfiles.length ? hindiProfiles : profiles;
+
     if (!available.length) {
         setMessage(panel, "Voicebox returned no available voice profiles.");
         workflow.appendChild(panel);
@@ -333,22 +347,31 @@ async function renderAudioStage(workflow, project, audioStage) {
     }
 
     const savedAssignments = Object.fromEntries(
-        (manifest?.voice_assignments || []).map(item => [item.speaker_id, item.profile_id])
+        (manifest?.voice_assignments || []).map(item => [
+            item.speaker_id,
+            item.profile_id
+        ])
     );
+
     const selectors = {};
     const assignmentSection = document.createElement("div");
     assignmentSection.className = "voice-assignment-list";
+
     const assignmentHeading = document.createElement("p");
-    assignmentHeading.textContent = "Choose a separate voice profile for every character and for narration:";
+    assignmentHeading.textContent =
+        "Choose a separate voice profile for every character and for narration:";
+
     assignmentSection.appendChild(assignmentHeading);
 
     for (const speaker of speakers) {
         const label = document.createElement("label");
         label.className = "voice-assignment";
+
         const title = document.createElement("span");
         title.textContent = speaker.kind === "narrator"
             ? speaker.name
             : `${speaker.name} (${speaker.id})`;
+
         const select = document.createElement("select");
         select.dataset.speakerId = speaker.id;
 
@@ -360,26 +383,44 @@ async function renderAudioStage(workflow, project, audioStage) {
         for (const profile of available) {
             const option = document.createElement("option");
             option.value = profile.id;
-            option.textContent = `${profile.name} · ${profile.language || "language not specified"}${profile.default_engine ? " · " + profile.default_engine : ""}`;
-            if (String(profile.id) === String(savedAssignments[speaker.id] || "")) {
+
+            option.textContent =
+                `${profile.name} · ${profile.language || "language not specified"}` +
+                `${profile.default_engine ? " · " + profile.default_engine : ""}`;
+
+            if (
+                String(profile.id) ===
+                String(savedAssignments[speaker.id] || "")
+            ) {
                 option.selected = true;
-            } else if (!savedAssignments[speaker.id] && speaker.kind === "narrator" &&
-                       String(profile.name).toLowerCase() === "niya") {
+            } else if (
+                !savedAssignments[speaker.id] &&
+                speaker.kind === "narrator" &&
+                String(profile.name).toLowerCase() === "niya"
+            ) {
                 option.selected = true;
             }
+
             select.appendChild(option);
         }
+
         selectors[speaker.id] = select;
         label.append(title, select);
         assignmentSection.appendChild(label);
     }
+
     panel.appendChild(assignmentSection);
 
     const status = manifest?.status || audioStage?.status || "pending";
     panel.dataset.audioStatus = status;
-    if (["running", "pause_requested", "stop_requested"].includes(status)) audioPollingEnabled = true;
+
+    if (isActive(status)) audioPollingEnabled = true;
+
     const completed = Number(manifest?.completed || 0);
-    const total = Number(manifest?.total || manifest?.segments?.length || 0);
+    const total = Number(
+        manifest?.total || manifest?.segments?.length || 0
+    );
+
     const detail = document.createElement("p");
     detail.className = "message";
     detail.dataset.role = "audio-detail";
@@ -397,11 +438,14 @@ async function renderAudioStage(workflow, project, audioStage) {
 
     const current = document.createElement("p");
     current.dataset.role = "audio-current";
+
     if (manifest?.current) {
-        current.textContent = `Current operation: ${manifest.current.scene_id} · ${manifest.current.segment_id} · ${manifest.current.speaker}`;
+        current.textContent =
+            `Current operation: ${manifest.current.scene_id} · ${manifest.current.segment_id} · ${manifest.current.speaker}`;
     } else {
         current.hidden = true;
     }
+
     panel.appendChild(current);
 
     const errorMessage = document.createElement("p");
@@ -417,42 +461,58 @@ async function renderAudioStage(workflow, project, audioStage) {
 
     const showGeneratedAssets = () => {
         const scenes = manifest?.scenes || [];
+
         for (const scene of scenes) {
             const section = document.createElement("div");
             section.className = "audio-scene";
+
             const title = document.createElement("p");
             title.textContent = scene.scene_id;
             section.appendChild(title);
+
             if (scene.audio) {
                 const audio = document.createElement("audio");
                 audio.controls = true;
                 audio.preload = "none";
-                audio.src = `/api/projects/${project.id}/assets/${scene.audio}`;
+                audio.src =
+                    `/api/projects/${project.id}/assets/${scene.audio}`;
                 audio.style.display = "block";
                 audio.style.width = "100%";
                 section.appendChild(audio);
             }
+
             for (const segment of (scene.segments || [])) {
                 if (!segment.audio) continue;
+
                 const link = document.createElement("a");
-                link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
-                link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
+                link.href =
+                    `/api/projects/${project.id}/assets/${segment.audio}`;
+                link.textContent =
+                    `Download ${segment.segment_id} · ${segment.speaker}`;
                 link.target = "_blank";
                 link.style.display = "block";
                 section.appendChild(link);
             }
+
             panel.appendChild(section);
         }
+
         if (manifest?.segments?.length) {
-            const completedSegments = manifest.segments.filter(item => item.status === "completed");
+            const completedSegments = manifest.segments.filter(
+                item => item.status === "completed"
+            );
+
             if (completedSegments.length && !scenes.length) {
                 const listTitle = document.createElement("p");
                 listTitle.textContent = "Completed audio segments:";
                 panel.appendChild(listTitle);
+
                 for (const segment of completedSegments) {
                     const link = document.createElement("a");
-                    link.href = `/api/projects/${project.id}/assets/${segment.audio}`;
-                    link.textContent = `Download ${segment.segment_id} · ${segment.speaker}`;
+                    link.href =
+                        `/api/projects/${project.id}/assets/${segment.audio}`;
+                    link.textContent =
+                        `Download ${segment.segment_id} · ${segment.speaker}`;
                     link.target = "_blank";
                     link.style.display = "block";
                     panel.appendChild(link);
@@ -464,85 +524,318 @@ async function renderAudioStage(workflow, project, audioStage) {
     const addControl = (label, endpoint, cssClass) => {
         const button = createButton(label, async btn => {
             btn.disabled = true;
+
             try {
-                await api(`/api/projects/${project.id}/audio/${endpoint}`, { method: "POST" });
+                await api(
+                    `/api/projects/${project.id}/audio/${endpoint}`,
+                    { method: "POST" }
+                );
                 await loadProjects();
             } catch (error) {
                 btn.disabled = false;
                 setMessage(panel, error.message);
             }
         });
+
         if (cssClass) button.className = cssClass;
         controls.appendChild(button);
     };
 
-    if (["running", "pause_requested", "stop_requested"].includes(status)) {
-        assignmentSection.querySelectorAll("select").forEach(select => select.disabled = true);
-        addControl(status === "running" ? "Pause after current segment" : "Pause requested…", "control/pause", "secondary");
-        addControl(status === "running" ? "Stop after current segment" : "Stop requested…", "control/stop", "danger");
+    if (isActive(status)) {
+        assignmentSection.querySelectorAll("select").forEach(
+            select => select.disabled = true
+        );
+
+        addControl(
+            status === "running"
+                ? "Pause after current segment"
+                : "Pause requested…",
+            "control/pause",
+            "secondary"
+        );
+
+        addControl(
+            status === "running"
+                ? "Stop after current segment"
+                : "Stop requested…",
+            "control/stop",
+            "danger"
+        );
+
     } else {
         const generateButton = createButton(
             manifest ? "Generate / Continue Audio" : "Generate Scene Audio",
             async button => {
                 const voiceAssignments = {};
+
                 for (const [speakerId, select] of Object.entries(selectors)) {
                     if (!select.value) {
-                        setMessage(panel, `Please select a voice profile for ${speakerId}.`);
+                        setMessage(
+                            panel,
+                            `Please select a voice profile for ${speakerId}.`
+                        );
                         select.focus();
                         return;
                     }
+
                     voiceAssignments[speakerId] = select.value;
                 }
+
                 button.disabled = true;
                 button.textContent = "Starting audio generation…";
+
                 try {
-                    await api(`/api/projects/${project.id}/audio/generate`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ voice_assignments: voiceAssignments, engine: "chatterbox" })
-                    });
+                    await api(
+                        `/api/projects/${project.id}/audio/generate`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                voice_assignments: voiceAssignments,
+                                engine: "chatterbox"
+                            })
+                        }
+                    );
+
                     await loadProjects();
+
                 } catch (error) {
                     button.disabled = false;
-                    button.textContent = manifest ? "Generate / Continue Audio" : "Generate Scene Audio";
+                    button.textContent = manifest
+                        ? "Generate / Continue Audio"
+                        : "Generate Scene Audio";
+
                     setMessage(panel, error.message);
                 }
             }
         );
+
         controls.appendChild(generateButton);
 
-        if (manifest && ["paused", "stopped", "failed", "running", "pause_requested", "stop_requested"].includes(status)) {
+        if (
+            manifest &&
+            ["paused", "stopped", "failed"].includes(status)
+        ) {
             addControl("Resume from checkpoint", "resume", "secondary");
         }
     }
 
-    if (status === "completed" || (manifest?.segments || []).some(item => item.status === "completed")) {
+    if (
+        status === "completed" ||
+        (manifest?.segments || []).some(
+            item => item.status === "completed"
+        )
+    ) {
         showGeneratedAssets();
     }
+
     workflow.appendChild(panel);
 }
 
+/* ---------------- VIDEO STAGE ---------------- */
 
+function videoStatusLabel(status) {
+    const labels = {
+        completed: "Completed",
+        running: "Generating",
+        pending: "Pending",
+        failed: "Failed",
+        paused: "Paused",
+        stopped: "Stopped",
+        pause_requested: "Pause requested",
+        stop_requested: "Stop requested"
+    };
+
+    return labels[status] || status || "Pending";
+}
+
+function getScreenplaySceneRecords(screenplay) {
+    const candidates = [
+        screenplay?.scenes,
+        screenplay?.scene_list,
+        screenplay?.storyboard?.scenes,
+        screenplay?.shots
+    ];
+
+    const scenes = candidates.find(Array.isArray) || [];
+
+    return scenes.map((scene, index) => {
+        const sceneId =
+            scene.scene_id ??
+            scene.id ??
+            scene.scene_number ??
+            scene.number ??
+            `scene_${index + 1}`;
+
+        return {
+            ...scene,
+            scene_id: String(sceneId),
+            status: "pending",
+            video: null,
+            error: null
+        };
+    });
+}
+
+function normalizeVideoRecords(manifest) {
+    const raw = manifest?.scenes;
+
+    if (Array.isArray(raw)) return raw;
+
+    if (raw && typeof raw === "object") {
+        return Object.entries(raw).map(([sceneId, scene]) => ({
+            ...scene,
+            scene_id: scene.scene_id || sceneId,
+            video: scene.video || scene.path || null
+        }));
+    }
+
+    return [];
+}
+
+function mergeSceneRecords(manifestRecords, screenplayRecords) {
+    if (!manifestRecords.length) return screenplayRecords;
+
+    const manifestIds = new Set(
+        manifestRecords.map(scene => String(scene.scene_id))
+    );
+
+    const extra = screenplayRecords.filter(
+        scene => !manifestIds.has(String(scene.scene_id))
+    );
+
+    return [...manifestRecords, ...extra];
+}
+
+function createVideoSceneCard(project, scene, workerActive) {
+    const sceneId = String(scene.scene_id);
+
+    const section = document.createElement("div");
+    section.className = "video-scene";
+    section.dataset.sceneId = sceneId;
+
+    const title = document.createElement("h5");
+    title.textContent = `Scene ${sceneId}`;
+
+    const status = document.createElement("p");
+    status.className = "message video-scene-status";
+    status.textContent = videoStatusLabel(scene.status);
+
+    section.append(title, status);
+
+    const error = document.createElement("p");
+    error.className = "message video-scene-error";
+    error.textContent = scene.error ? `Error: ${scene.error}` : "";
+    error.hidden = !scene.error;
+    section.appendChild(error);
+
+    const videoPath = scene.video || scene.path || null;
+
+    if (scene.status === "completed" && videoPath) {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "none";
+        video.src =
+            `/api/projects/${project.id}/assets/${videoPath}`;
+        video.style.width = "100%";
+        video.style.maxWidth = "640px";
+        video.style.display = "block";
+        section.appendChild(video);
+
+        const download = document.createElement("a");
+        download.href =
+            `/api/projects/${project.id}/assets/${videoPath}`;
+        download.textContent = "Download clip";
+        download.target = "_blank";
+        download.style.display = "block";
+        section.appendChild(download);
+    } else {
+        const placeholder = document.createElement("p");
+        placeholder.className = "video-scene-placeholder";
+
+        if (scene.status === "running") {
+            placeholder.textContent =
+                "This scene is currently being generated.";
+        } else if (scene.status === "failed") {
+            placeholder.textContent =
+                "Video generation failed. You can retry this scene.";
+        } else {
+            placeholder.textContent =
+                "No completed video clip is available for this scene.";
+        }
+
+        section.appendChild(placeholder);
+    }
+
+    const retryButton = createButton(
+        scene.status === "completed" && videoPath
+            ? "Regenerate Clip"
+            : "Generate / Retry This Clip",
+        async button => {
+            button.disabled = true;
+            button.textContent = "Queuing scene…";
+
+            try {
+                await api(
+                    `/api/projects/${project.id}/video/scenes/${encodeURIComponent(sceneId)}/regenerate`,
+                    { method: "POST" }
+                );
+
+                audioPollingEnabled = true;
+                await loadProjects();
+
+            } catch (error) {
+                button.disabled = false;
+                button.textContent =
+                    scene.status === "completed" && videoPath
+                        ? "Regenerate Clip"
+                        : "Generate / Retry This Clip";
+
+                setMessage(section, error.message);
+            }
+        }
+    );
+
+    retryButton.className = "secondary";
+    retryButton.disabled = workerActive || scene.status === "running";
+
+    if (scene.status !== "running") {
+        section.appendChild(retryButton);
+    }
+
+    return section;
+}
 
 async function renderVideoStage(workflow, project, videoStage) {
     const panel = document.createElement("div");
     panel.className = "video-stage";
     panel.dataset.projectId = project.id;
+
     const heading = document.createElement("h4");
     heading.textContent = "Video Production · Kaggle LTX";
     panel.appendChild(heading);
 
-    let manifest = null;
-    try {
-        manifest = await api(`/api/projects/${project.id}/video`).catch(() => null);
-    } catch (_) {
-        manifest = null;
-    }
+    const [manifest, screenplayData] = await Promise.all([
+        api(`/api/projects/${project.id}/video`).catch(() => null),
+        api(`/api/projects/${project.id}/screenplay`).catch(() => null)
+    ]);
+
+    const manifestRecords = normalizeVideoRecords(manifest);
+    const screenplayRecords = getScreenplaySceneRecords(
+        screenplayData?.screenplay || {}
+    );
+
+    const sceneRecords = mergeSceneRecords(
+        manifestRecords,
+        screenplayRecords
+    );
 
     const status = manifest?.status || videoStage?.status || "pending";
+    const workerActive = isActive(status);
+
     panel.dataset.videoStatus = status;
-    const active = ["running", "pause_requested", "stop_requested"];
-    if (active.includes(status)) audioPollingEnabled = true;
+
+    if (workerActive) audioPollingEnabled = true;
 
     const detail = document.createElement("p");
     detail.className = "message";
@@ -551,20 +844,31 @@ async function renderVideoStage(workflow, project, videoStage) {
         "Generate one LTX clip per scene using its approved image and combined audio.";
     panel.appendChild(detail);
 
+    const completed = Number(
+        manifest?.completed ??
+        sceneRecords.filter(scene => scene.status === "completed").length
+    );
+
+    const total = Number(
+        manifest?.total || sceneRecords.length || 0
+    );
+
     const progress = document.createElement("p");
     progress.dataset.role = "video-progress";
-    const completed = Number(manifest?.completed || 0);
-    const total = Number(manifest?.total || manifest?.scenes?.length || 0);
-    progress.textContent = total ? `Progress: ${completed} / ${total} scenes` : "Progress: waiting to start";
+    progress.textContent = total
+        ? `Progress: ${completed} / ${total} scenes`
+        : "Progress: waiting to start";
     panel.appendChild(progress);
 
     const current = document.createElement("p");
     current.dataset.role = "video-current";
+
     if (manifest?.current) {
         current.textContent = `Current scene: ${manifest.current.scene_id}`;
     } else {
         current.hidden = true;
     }
+
     panel.appendChild(current);
 
     const error = document.createElement("p");
@@ -581,49 +885,144 @@ async function renderVideoStage(workflow, project, videoStage) {
     const addControl = (label, endpoint, cssClass) => {
         const button = createButton(label, async btn => {
             btn.disabled = true;
+
             try {
-                await api(`/api/projects/${project.id}/video/${endpoint}`, { method: "POST" });
+                await api(
+                    `/api/projects/${project.id}/video/${endpoint}`,
+                    { method: "POST" }
+                );
+
+                audioPollingEnabled = true;
                 await loadProjects();
+
             } catch (err) {
                 btn.disabled = false;
                 setMessage(panel, err.message);
             }
         });
+
         if (cssClass) button.className = cssClass;
         controls.appendChild(button);
     };
 
-    if (active.includes(status)) {
-        addControl(status === "running" ? "Pause after current clip" : "Pause requested…", "control/pause", "secondary");
-        addControl(status === "running" ? "Stop after current clip" : "Stop requested…", "control/stop", "danger");
-    } else if (status === "paused" || status === "stopped" || status === "failed") {
-        addControl("Resume from checkpoint", "resume", "secondary");
-        addControl("Regenerate / Continue Videos", "generate", "");
-    } else if (status !== "completed") {
-        addControl("Generate Scene Videos", "generate", "");
+    if (workerActive) {
+        addControl(
+            status === "running"
+                ? "Pause after current clip"
+                : "Pause requested…",
+            "control/pause",
+            "secondary"
+        );
+
+        addControl(
+            status === "running"
+                ? "Stop after current clip"
+                : "Stop requested…",
+            "control/stop",
+            "danger"
+        );
+    } else {
+        if (["paused", "stopped", "failed"].includes(status)) {
+            addControl("Resume from checkpoint", "resume", "secondary");
+        }
+
+        if (
+            status !== "completed" ||
+            sceneRecords.some(scene =>
+                scene.status !== "completed" || !(scene.video || scene.path)
+            )
+        ) {
+            addControl("Generate / Continue Videos", "generate", "");
+        }
     }
 
-    for (const scene of (manifest?.scenes || [])) {
-        if (scene.status !== "completed" || !scene.video) continue;
-        const section = document.createElement("div");
-        section.className = "video-scene";
-        const title = document.createElement("p");
-        title.textContent = scene.scene_id;
-        const video = document.createElement("video");
-        video.controls = true;
-        video.preload = "none";
-        video.src = `/api/projects/${project.id}/assets/${scene.video}`;
-        video.style.width = "100%";
-        video.style.maxWidth = "640px";
-        section.append(title, video);
-        panel.appendChild(section);
+    const scenesContainer = document.createElement("div");
+    scenesContainer.className = "video-scenes";
+    scenesContainer.dataset.role = "video-scenes";
+
+    if (sceneRecords.length) {
+        for (const scene of sceneRecords) {
+            scenesContainer.appendChild(
+                createVideoSceneCard(project, scene, workerActive)
+            );
+        }
+    } else {
+        const empty = document.createElement("p");
+        empty.textContent =
+            "No scenes were found in the screenplay or video manifest.";
+        scenesContainer.appendChild(empty);
     }
+
+    panel.appendChild(scenesContainer);
     workflow.appendChild(panel);
 }
 
-// Poll only the audio manifest. Keep project cards, voice selectors and controls
-// mounted while a segment is being generated.
-let audioPollInFlight = false;
+/* ---------------- VIDEO SCENE STATUS UPDATES ---------------- */
+
+function updateVideoSceneCards(panel, projectId, manifest) {
+    const container = panel.querySelector(
+        '[data-role="video-scenes"]'
+    );
+
+    if (!container) return;
+
+    const records = normalizeVideoRecords(manifest);
+
+    // Do not remove screenplay-derived scene cards when the manifest is empty.
+    if (!records.length) {
+        container.querySelectorAll(".video-scene button").forEach(button => {
+            button.disabled = isActive(manifest.status);
+        });
+        return;
+    }
+
+    const active = isActive(manifest.status);
+
+    const oldCards = Array.from(
+        container.querySelectorAll(".video-scene")
+    );
+
+    const oldSignature = oldCards.map(card => {
+        const video = card.querySelector("video");
+
+        return [
+            card.dataset.sceneId,
+            card.querySelector(".video-scene-status")?.textContent || "",
+            video?.getAttribute("src") || "",
+            card.querySelector(".video-scene-error")?.textContent || ""
+        ].join("|");
+    }).join("||");
+
+    const newSignature = records.map(scene => [
+        scene.scene_id,
+        videoStatusLabel(scene.status),
+        scene.status === "completed" && (scene.video || scene.path)
+            ? `/api/projects/${projectId}/assets/${scene.video || scene.path}`
+            : "",
+        scene.error ? `Error: ${scene.error}` : ""
+    ].join("|")).join("||");
+
+    if (oldSignature === newSignature) {
+        container.querySelectorAll("button").forEach(button => {
+            button.disabled = active;
+        });
+        return;
+    }
+
+    container.innerHTML = "";
+
+    for (const scene of records) {
+        container.appendChild(
+            createVideoSceneCard(
+                { id: projectId },
+                scene,
+                active
+            )
+        );
+    }
+}
+
+/* ---------------- STATUS POLLING ---------------- */
 
 setInterval(async () => {
     if (
@@ -634,8 +1033,14 @@ setInterval(async () => {
         return;
     }
 
-    const panels = Array.from(document.querySelectorAll(".audio-stage"));
-    const videoPanels = Array.from(document.querySelectorAll(".video-stage"));
+    const panels = Array.from(
+        document.querySelectorAll(".audio-stage")
+    );
+
+    const videoPanels = Array.from(
+        document.querySelectorAll(".video-stage")
+    );
+
     if (!panels.length && !videoPanels.length) {
         audioPollingEnabled = false;
         return;
@@ -644,6 +1049,7 @@ setInterval(async () => {
     audioPollInFlight = true;
 
     try {
+        // AUDIO STATUS POLLING
         for (const panel of panels) {
             const projectId = panel.dataset.projectId;
             if (!projectId) continue;
@@ -654,13 +1060,25 @@ setInterval(async () => {
 
             if (!manifest) continue;
 
-            const detail = panel.querySelector('[data-role="audio-detail"]');
-            const progress = panel.querySelector('[data-role="audio-progress"]');
-            const current = panel.querySelector('[data-role="audio-current"]');
-            const errorMessage = panel.querySelector('[data-role="audio-error"]');
+            const detail = panel.querySelector(
+                '[data-role="audio-detail"]'
+            );
+
+            const progress = panel.querySelector(
+                '[data-role="audio-progress"]'
+            );
+
+            const current = panel.querySelector(
+                '[data-role="audio-current"]'
+            );
+
+            const errorMessage = panel.querySelector(
+                '[data-role="audio-error"]'
+            );
 
             if (detail) {
-                detail.textContent = manifest.detail || manifest.status || "";
+                detail.textContent =
+                    manifest.detail || manifest.status || "";
             }
 
             if (progress) {
@@ -668,7 +1086,9 @@ setInterval(async () => {
                 const total = Number(
                     manifest.total || manifest.segments?.length || 0
                 );
-                progress.textContent = `Progress: ${completed} / ${total} segments`;
+
+                progress.textContent =
+                    `Progress: ${completed} / ${total} segments`;
                 progress.hidden = total <= 0;
             }
 
@@ -688,62 +1108,88 @@ setInterval(async () => {
                 errorMessage.hidden = !manifest.error;
             }
 
-            const activeStatuses = [
-                "running",
-                "pause_requested",
-                "stop_requested"
-            ];
             const previousStatus = panel.dataset.audioStatus;
             const nextStatus = manifest.status || previousStatus;
+
             panel.dataset.audioStatus = nextStatus;
 
-            // Rebuild once after a real state transition to paused, stopped,
-            // failed or completed, so the appropriate controls/assets appear.
-            if (
-                activeStatuses.includes(previousStatus) &&
-                !activeStatuses.includes(nextStatus)
-            ) {
+            if (isActive(previousStatus) && !isActive(nextStatus)) {
                 await loadProjects();
                 return;
             }
         }
 
+        // VIDEO STATUS POLLING
         for (const panel of videoPanels) {
             const projectId = panel.dataset.projectId;
             if (!projectId) continue;
-            const manifest = await api(`/api/projects/${projectId}/video`).catch(() => null);
+
+            const manifest = await api(
+                `/api/projects/${projectId}/video`
+            ).catch(() => null);
+
             if (!manifest) continue;
 
-            const detail = panel.querySelector('[data-role="video-detail"]');
-            const progress = panel.querySelector('[data-role="video-progress"]');
-            const current = panel.querySelector('[data-role="video-current"]');
-            const error = panel.querySelector('[data-role="video-error"]');
-            if (detail) detail.textContent = manifest.detail || manifest.status || "";
-            if (progress) progress.textContent = `Progress: ${Number(manifest.completed || 0)} / ${Number(manifest.total || 0)} scenes`;
+            const detail = panel.querySelector(
+                '[data-role="video-detail"]'
+            );
+
+            const progress = panel.querySelector(
+                '[data-role="video-progress"]'
+            );
+
+            const current = panel.querySelector(
+                '[data-role="video-current"]'
+            );
+
+            const error = panel.querySelector(
+                '[data-role="video-error"]'
+            );
+
+            if (detail) {
+                detail.textContent =
+                    manifest.detail || manifest.status || "";
+            }
+
+            if (progress) {
+                progress.textContent =
+                    `Progress: ${Number(manifest.completed || 0)} / ${Number(manifest.total || 0)} scenes`;
+            }
+
             if (current) {
-                current.textContent = manifest.current ? `Current scene: ${manifest.current.scene_id}` : "";
+                current.textContent = manifest.current
+                    ? `Current scene: ${manifest.current.scene_id}`
+                    : "";
                 current.hidden = !manifest.current;
             }
+
             if (error) {
                 error.textContent = manifest.error || "";
                 error.hidden = !manifest.error;
             }
+
+            updateVideoSceneCards(panel, projectId, manifest);
+
             const previousStatus = panel.dataset.videoStatus;
             const nextStatus = manifest.status || previousStatus;
+
             panel.dataset.videoStatus = nextStatus;
-            if (["running", "pause_requested", "stop_requested"].includes(previousStatus) &&
-                !["running", "pause_requested", "stop_requested"].includes(nextStatus)) {
+
+            if (isActive(previousStatus) && !isActive(nextStatus)) {
                 await loadProjects();
                 return;
             }
         }
 
         audioPollingEnabled =
-            panels.some(panel => ["running", "pause_requested", "stop_requested"].includes(panel.dataset.audioStatus)) ||
-            videoPanels.some(panel => ["running", "pause_requested", "stop_requested"].includes(panel.dataset.videoStatus));
+            panels.some(panel => isActive(panel.dataset.audioStatus)) ||
+            videoPanels.some(panel => isActive(panel.dataset.videoStatus));
+
     } catch (error) {
-        console.error("Audio status polling error:", error);
+        console.error("Production status polling error:", error);
     } finally {
         audioPollInFlight = false;
     }
 }, 3000);
+
+loadProjects();
