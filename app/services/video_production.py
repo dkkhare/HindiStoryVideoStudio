@@ -559,6 +559,7 @@ async def _process_video_scene(
     scene_id = str(scene.get("scene_id") or f"SCENE_{index:03d}")
     destination = _safe_media_path(project_path, record["video"])
     worker = None
+    worker_offline = False
 
     try:
         if _CONTROLS.get(project_id) in {"pause", "stop"}:
@@ -629,6 +630,10 @@ async def _process_video_scene(
         return None
 
     except Exception as exc:
+        worker_offline = isinstance(
+            exc,
+            (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
+        )
         logger.exception("Video scene %s failed for project %s", scene_id, project_id)
         record["status"] = "failed"
         record["error"] = str(exc)
@@ -637,14 +642,8 @@ async def _process_video_scene(
 
     finally:
         if worker is not None:
-            offline = False
             error = record.get("error")
-            if error:
-                offline = any(
-                    token in str(error).lower()
-                    for token in ("connecterror", "connecttimeout", "readtimeout", "remoteprotocolerror")
-                )
-            release_worker(worker["id"], offline=offline, error=error)
+            release_worker(worker["id"], offline=worker_offline, error=error)
         manifest["completed"] = _completed_count(project_path, manifest)
         manifest["current"] = None
         write_manifest(project_path, manifest)
