@@ -29,10 +29,16 @@ Gemini TTS or F5-TTS audio, ComfyUI/LTX-2.5 video generation, and FFmpeg post-pr
 
 Implemented: project creation/listing, SQLite persistence, settings, web dashboard,
 Gemini structured screenplay generation, project folder creation, health checks,
-ComfyUI queue/history client foundation, TTS provider interfaces, production-stage
-records and resumable stage state.
+ComfyUI queue/history client foundation, Voicebox audio generation, per-character
+voice assignment, narrator voice assignment, and checkpointed audio-stage controls.
 
-Provider-specific image/TTS/video workflow execution is intentionally adapter-based.
+Audio generation is performed one spoken segment at a time. Pause and Stop requests
+are honored at the current segment boundary; completed WAV files and the audio manifest
+are preserved. Resume continues from the first unfinished segment, including after a
+server restart. Changing a speaker voice invalidates only that speaker's completed
+segments so they can be regenerated with the new profile.
+
+Image and video provider workflow execution remains adapter-based.
 The ComfyUI workflow JSON must be exported in API format and node IDs mapped in
 `workflows/ltx25_i2v_api.json` before a real LTX job can run. No API keys are stored
 in the database or source code.
