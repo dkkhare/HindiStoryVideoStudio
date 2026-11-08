@@ -1,15 +1,13 @@
 """Database-backed registry and scheduler for independent Kaggle workers."""
 import asyncio
 import hashlib
-import ipaddress
 import logging
-import socket
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import SessionLocal
@@ -66,6 +64,15 @@ async def register_worker(name: str, api_url: str, api_key: str) -> dict:
     if not workflow_path.is_file():
         raise RuntimeError(f"Workflow JSON file not found: {workflow_path}")
     workflow_json = workflow_path.read_text(encoding="utf-8")
+    db = SessionLocal()
+    try:
+        if db.query(KaggleWorker).count() >= MAX_WORKERS:
+            raise ValueError(f"Only {MAX_WORKERS} Kaggle workers can be registered.")
+        if db.query(KaggleWorker).filter(KaggleWorker.api_url == url).first():
+            raise ValueError("This Kaggle URL is already registered.")
+    finally:
+        db.close()
+
     headers = {"X-API-Key": api_key.strip()}
     timeout = httpx.Timeout(connect=20, read=120, write=120, pool=20)
     async with httpx.AsyncClient(timeout=timeout) as client:
