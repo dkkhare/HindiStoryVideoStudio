@@ -568,7 +568,7 @@ async function renderImagesView(panel, project, stages) {
 async function renderStoryVideoView(panel, project) {
     const manifest = await api(`/api/projects/${project.id}/video`).catch(() => null);
     const finalPath = manifest?.final_video || manifest?.story_video || manifest?.output;
-    if (finalPath && manifest?.status === "completed") {
+    if (finalPath) {
         const video = document.createElement("video");
         video.controls = true;
         video.preload = "metadata";
@@ -584,15 +584,47 @@ async function renderStoryVideoView(panel, project) {
         panel.appendChild(link);
         return;
     }
+
+    const scenes = normalizeVideoRecords(manifest).filter(scene =>
+        scene.status === "completed" && (scene.video || scene.path)
+    );
+    if (scenes.length) {
+        const note = document.createElement("p");
+        note.className = "message";
+        note.textContent = `This project has ${scenes.length} completed scene clip(s). Play them below in screenplay order. A single merged film is not yet present.`;
+        panel.appendChild(note);
+
+        for (const scene of scenes) {
+            const card = document.createElement("div");
+            card.className = "screenplay-scene";
+            const title = document.createElement("h4");
+            title.textContent = scene.title || scene.scene_id || "Scene clip";
+            const video = document.createElement("video");
+            video.controls = true;
+            video.preload = "metadata";
+            video.src = `/api/projects/${project.id}/assets/${scene.video || scene.path}`;
+            video.style.width = "100%";
+            video.style.maxWidth = "900px";
+            card.append(title, video);
+            const link = document.createElement("a");
+            link.href = video.src;
+            link.textContent = "Open / download this clip";
+            link.target = "_blank";
+            card.appendChild(link);
+            panel.appendChild(card);
+        }
+        return;
+    }
+
     const empty = document.createElement("div");
     empty.className = "story-video-empty";
     const strong = document.createElement("strong");
-    strong.textContent = "Your final story video will appear here";
+    strong.textContent = "No completed story video is saved yet";
     const p = document.createElement("p");
-    p.textContent = "First complete the scene videos in Video Clips. The current backend generates and stores individual scene clips; final film assembly is not yet available in this project workflow.";
+    p.textContent = manifest?.detail || "After scene clips are generated, they will be listed here. A final merged story video can be shown here when the assembly step creates it.";
     empty.append(strong, p);
     panel.appendChild(empty);
-    const button = createButton("View video clips", () => selectProject(project.id, "video-clips"));
+    const button = createButton("Open Video Clips", () => selectProject(project.id, "video-clips"));
     button.className = "secondary-button";
     panel.appendChild(button);
 }
