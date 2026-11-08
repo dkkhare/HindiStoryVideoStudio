@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
 from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
+from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
 
 logger = logging.getLogger(__name__)
 
@@ -55,30 +56,6 @@ PROMPT_NODE = "459"
 DURATION_NODE = "378"
 FPS_NODE = "379"
 VIDEO_OUTPUT_NODE = "400"
-
-DEFAULT_WORKFLOW_ID = "df6f47b947d14adc8b483c1a768673a9"
-
-
-def _get_active_workflow_id() -> str:
-    """Retrieve the latest registered workflow ID from the database dynamically."""
-    try:
-        db_path = Path("data/studio.db")
-        if db_path.is_file():
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM app_settings WHERE key = 'active_workflow_id'")
-            row = cursor.fetchone()
-            conn.close()
-            if row and row[0]:
-                return str(row[0]).strip()
-    except Exception:
-        logger.exception("Failed to retrieve active workflow ID from database, falling back.")
-
-    return str(
-        getattr(settings, "comfyui_workflow_id", "")
-        or DEFAULT_WORKFLOW_ID
-    ).strip()
-
 
 def _safe(value: str) -> str:
     return (
@@ -195,18 +172,11 @@ def _completed_count(
 class KaggleComfyClient:
     """Client for the Kaggle server's asynchronous /jobs API."""
 
-    def __init__(self):
-        self.base = settings.comfyui_base_url.rstrip("/")
-        self.api_key = settings.comfyui_api_key.strip()
-
-        if not self.base:
-            raise RuntimeError("COMFYUI_BASE_URL is not configured.")
-
-        if not self.api_key:
-            raise RuntimeError(
-                "COMFYUI_API_KEY is not configured in the local .env file."
-            )
-
+    def __init__(self, worker: dict):
+        self.base = worker["api_url"].rstrip("/")
+        self.api_key = worker["api_key"]
+        self.workflow_id = worker["workflow_id"]
+        self.worker_id = worker["id"]
         self.headers = {"X-API-Key": self.api_key}
 
     async def submit_job(
@@ -219,10 +189,7 @@ class KaggleComfyClient:
         fps: int,
     ) -> str:
 
-        # Dynamically fetch the latest workflow ID from the database right before posting
-        current_workflow_id = _get_active_workflow_id()
-        if not current_workflow_id:
-            raise RuntimeError("COMFYUI_WORKFLOW_ID is not configured.")
+        current_workflow_id = self.workflow_id
 
         inputs = {
             f"{DURATION_NODE}.value": float(duration),
@@ -645,7 +612,6 @@ async def _run_worker(
         manifest["completed"] = _completed_count(project_path, manifest)
 
         fps = int(settings.default_fps)
-        client_config = KaggleComfyClient()
 
         timeout = httpx.Timeout(
             connect=30.0,
@@ -766,6 +732,25 @@ async def _run_worker(
 
                     write_manifest(project_path, manifest)
 
+                    worker = None
+                    while worker is None:
+                        worker = await asyncio.to_thread(
+                            reserve_worker, project_id, scene_id
+                        )
+                        if worker is None:
+                            if worker_count() == 0:
+                                raise RuntimeError(
+                                    "No Kaggle workers are registered. Register at least one in Video Production."
+                                )
+                            if _CONTROLS.get(project_id) in {"pause", "stop"}:
+                                raise RuntimeError(
+                                    "Video generation control requested while waiting for a free worker."
+                                )
+                            manifest["detail"] = f"{scene_id} is waiting for a free Kaggle worker."
+                            write_manifest(project_path, manifest)
+                            await asyncio.sleep(3)
+
+                    client_config = KaggleComfyClient(worker)
                     job_id = await client_config.submit_job(
                         client=client,
                         image_path=image_path,
@@ -775,9 +760,11 @@ async def _run_worker(
                         fps=fps,
                     )
 
+                    update_worker_job(worker["id"], job_id)
                     record.update(
                         status="running",
                         job_id=job_id,
+                        worker_name=worker["name"],
                     )
 
                     manifest["detail"] = (
@@ -806,8 +793,17 @@ async def _run_worker(
                     record.pop("error", None)
 
                     logger.info("Completed video scene %s", scene_id)
+                    release_worker(worker["id"])
+                    worker = None
 
                 except Exception as scene_exc:
+                    if worker is not None:
+                        offline = isinstance(
+                            scene_exc,
+                            (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
+                        )
+                        release_worker(worker["id"], offline=offline, error=str(scene_exc))
+                        worker = None
                     logger.exception(
                         "Video scene %s failed for project %s",
                         scene_id,
