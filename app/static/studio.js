@@ -1,4 +1,109 @@
 
+
+/* ---------------- GLOBAL KAGGLE WORKER POOL ---------------- */
+
+async function refreshKaggleWorkers() {
+    const container = document.getElementById("kaggle-worker-list");
+    if (!container) return;
+    try {
+        const data = await api("/api/kaggle/workers");
+        const workers = data.workers || [];
+        container.innerHTML = "";
+        const summary = document.createElement("p");
+        summary.className = "message";
+        summary.textContent = `${workers.length} / ${data.limit || 5} workers registered · one active scene per worker`;
+        container.appendChild(summary);
+
+        if (!workers.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            empty.textContent = "No Kaggle workers registered yet.";
+            container.appendChild(empty);
+            return;
+        }
+
+        for (const worker of workers) {
+            const card = document.createElement("div");
+            card.className = "kaggle-worker-card";
+            const info = document.createElement("div");
+            const name = document.createElement("strong");
+            name.textContent = worker.name;
+            const url = document.createElement("small");
+            url.textContent = worker.api_url;
+            const workflow = document.createElement("small");
+            workflow.textContent = `Workflow: ${worker.workflow_id}`;
+            info.append(name, url, workflow);
+            const status = document.createElement("span");
+            status.className = `worker-status worker-${String(worker.status).toLowerCase()}`;
+            status.textContent = worker.status;
+            card.append(info, status);
+            if (worker.current_scene_id || worker.current_job_id) {
+                const job = document.createElement("small");
+                job.textContent = `Project ${worker.current_project_id || ""} · ${worker.current_scene_id || ""} · Job ${worker.current_job_id || "submitting"}`;
+                card.appendChild(job);
+            }
+            if (worker.last_error) {
+                const error = document.createElement("small");
+                error.className = "worker-error";
+                error.textContent = worker.last_error;
+                card.appendChild(error);
+            }
+            const remove = createButton("Remove", async button => {
+                button.disabled = true;
+                try {
+                    await api(`/api/kaggle/workers/${worker.id}`, { method: "DELETE" });
+                    await refreshKaggleWorkers();
+                } catch (err) {
+                    button.disabled = false;
+                    const message = document.getElementById("kaggle-worker-message");
+                    if (message) message.textContent = err.message;
+                }
+            });
+            remove.className = "secondary";
+            card.appendChild(remove);
+            container.appendChild(card);
+        }
+    } catch (error) {
+        container.textContent = error.message;
+    }
+}
+
+function initializeKaggleWorkerForm() {
+    const form = document.getElementById("kaggle-worker-form");
+    if (!form) return;
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const message = document.getElementById("kaggle-worker-message");
+        const button = form.querySelector('button[type="submit"]');
+        const values = new FormData(form);
+        button.disabled = true;
+        button.textContent = "Checking server and registering workflow…";
+        if (message) message.textContent = "";
+        try {
+            await api("/api/kaggle/workers/register", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: values.get("name"),
+                    api_url: values.get("api_url"),
+                    api_key: values.get("api_key")
+                })
+            });
+            form.reset();
+            if (message) message.textContent = "Kaggle worker registered successfully.";
+            await refreshKaggleWorkers();
+        } catch (error) {
+            if (message) message.textContent = error.message;
+        } finally {
+            button.disabled = false;
+            button.textContent = "Register Kaggle Workflow";
+        }
+    });
+    refreshKaggleWorkers();
+    setInterval(refreshKaggleWorkers, 15000);
+}
+
+
 const form = document.getElementById("project-form");
 const message = document.getElementById("message");
 const list = document.getElementById("projects");
@@ -247,7 +352,8 @@ async function runAction(button, projectId, endpoint, progressText) {
         await api(`/api/projects/${projectId}/${endpoint}`, {
             method: "POST"
         });
-        await loadProjects();
+        await initializeKaggleWorkerForm();
+loadProjects();
     } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
