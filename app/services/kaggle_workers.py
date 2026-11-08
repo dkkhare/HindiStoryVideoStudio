@@ -134,17 +134,19 @@ def reserve_worker(project_id: int, scene_id: str) -> dict | None:
     """Atomically reserve one FREE worker; safe across concurrent projects/processes."""
     db = SessionLocal()
     try:
-        worker_id = db.execute(
+        candidate_id = (
             select(KaggleWorker.id)
             .where(KaggleWorker.status == "FREE")
             .order_by(KaggleWorker.id)
             .limit(1)
-        ).scalar_one_or_none()
-        if worker_id is None:
-            return None
-        result = db.execute(
+            .scalar_subquery()
+        )
+        reserved_id = db.execute(
             update(KaggleWorker)
-            .where(KaggleWorker.id == worker_id, KaggleWorker.status == "FREE")
+            .where(
+                KaggleWorker.id == candidate_id,
+                KaggleWorker.status == "FREE",
+            )
             .values(
                 status="BUSY",
                 current_project_id=project_id,
@@ -152,12 +154,13 @@ def reserve_worker(project_id: int, scene_id: str) -> dict | None:
                 current_job_id=None,
                 updated_at=datetime.now(timezone.utc),
             )
-        )
-        if result.rowcount != 1:
+            .returning(KaggleWorker.id)
+        ).scalar_one_or_none()
+        if reserved_id is None:
             db.rollback()
             return None
         db.commit()
-        worker = db.get(KaggleWorker, worker_id)
+        worker = db.get(KaggleWorker, reserved_id)
         return {
             **serialize_worker(worker),
             "api_key": decrypt_api_key(worker.encrypted_api_key),
