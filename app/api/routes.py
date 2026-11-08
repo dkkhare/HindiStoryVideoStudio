@@ -2,6 +2,7 @@
 import json
 import logging
 import wave
+import httpx
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -730,11 +731,9 @@ async def generate_project_video(
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
-    if video_worker_active(project_id):
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
+if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
     image_stage = get_stage(project, "scene_images")
@@ -821,11 +820,9 @@ async def regenerate_project_video_scene(
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="The screenplay is missing.")
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
-    if video_worker_active(project_id):
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
+if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
     image_stage = get_stage(project, "scene_images")
@@ -980,12 +977,9 @@ async def resume_project_video(
 ):
     project = get_project_or_404(project_id, db)
 
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
-
-    manifest = read_video_manifest(Path(project.project_path))
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
+manifest = read_video_manifest(Path(project.project_path))
     if not manifest:
         raise HTTPException(status_code=404, detail="No video checkpoint exists. Start video generation first.")
     if video_worker_active(project_id):
