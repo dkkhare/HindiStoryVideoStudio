@@ -54,6 +54,8 @@ def get_kaggle_workers():
 async def register_kaggle_worker(request: Request):
     try:
         payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Worker registration payload must be a JSON object.")
         worker = await register_worker(
             name=str(payload.get("name") or ""),
             api_url=str(payload.get("api_url") or ""),
