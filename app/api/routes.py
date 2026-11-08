@@ -291,17 +291,28 @@ async def generate_screenplay(
 def get_screenplay(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
 
-    if not project.screenplay_json:
-        raise HTTPException(
-            status_code=404,
-            detail="Screenplay has not been generated yet.",
-        )
+    # Recover screenplay data from disk if the DB column is empty.
+    screenplay_data = None
+    if project.screenplay_json:
+        try:
+            screenplay_data = json.loads(project.screenplay_json)
+        except json.JSONDecodeError:
+            logger.exception("Invalid screenplay JSON in database for project %s", project.id)
+
+    screenplay_file = Path(project.project_path) / "screenplay.json"
+    if screenplay_data is None and screenplay_file.is_file():
+        try:
+            screenplay_data = json.loads(screenplay_file.read_text(encoding="utf-8"))
+            project.screenplay_json = json.dumps(screenplay_data, ensure_ascii=False, indent=2)
+            db.commit()
+        except (OSError, json.JSONDecodeError):
+            logger.exception("Could not recover screenplay file for project %s", project.id)
 
     return {
         "project_id": project.id,
-        "screenplay": json.loads(project.screenplay_json),
+        "generated": screenplay_data is not None,
+        "screenplay": screenplay_data,
     }
-
 
 @router.post("/projects/{project_id}/screenplay/approve")
 def approve_screenplay(
@@ -709,7 +720,16 @@ def get_project_audio(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
     manifest = read_manifest(Path(project.project_path))
     if not manifest:
-        raise HTTPException(status_code=404, detail="No audio checkpoint has been created yet.")
+        return {
+            "project_id": project.id,
+            "status": "pending",
+            "detail": "Audio has not been generated yet.",
+            "segments": [],
+            "scenes": [],
+            "voice_assignments": [],
+            "completed": 0,
+            "total": 0,
+        }
 
     if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not audio_worker_active(project_id):
         manifest["status"] = "paused"
@@ -796,7 +816,14 @@ def get_project_video(project_id: int, db: Session = Depends(get_db)):
     manifest = read_video_manifest(project_path)
 
     if not manifest:
-        raise HTTPException(status_code=404, detail="No video generation manifest exists yet.")
+        return {
+            "project_id": project.id,
+            "status": "pending",
+            "detail": "Scene video clips have not been generated yet.",
+            "scenes": [],
+            "completed": 0,
+            "total": 0,
+        }
 
     if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not video_worker_active(project_id):
         manifest["status"] = "paused"
