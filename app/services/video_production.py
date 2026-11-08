@@ -687,6 +687,7 @@ async def _run_worker(
         else "Connecting to Kaggle ComfyUI..."
     )
     manifest["current"] = None
+    manifest["active_scenes"] = []
 
     write_manifest(project_path, manifest)
     _set_stage(project_id, StageStatus.running, manifest["detail"])
