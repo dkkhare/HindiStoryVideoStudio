@@ -540,6 +540,119 @@ def _unfinished_scenes(
     return unfinished
 
 
+
+async def _process_video_scene(
+    project_id: int,
+    project_path: Path,
+    screenplay: dict,
+    scene: dict,
+    index: int,
+    total: int,
+    record: dict,
+    image_scenes: dict,
+    audio_scenes: dict,
+    fps: int,
+    client: httpx.AsyncClient,
+) -> str | None:
+    """Generate one scene. The database reservation is the global concurrency gate."""
+    scene_id = str(scene.get("scene_id") or f"SCENE_{index:03d}")
+    destination = _safe_media_path(project_path, record["video"])
+    worker = None
+
+    try:
+        if _CONTROLS.get(project_id) in {"pause", "stop"}:
+            return None
+
+        image_record = image_scenes.get(scene_id) or {}
+        audio_record = audio_scenes.get(scene_id) or {}
+        image_rel = image_record.get("path")
+        audio_rel = audio_record.get("audio")
+        if not image_rel:
+            raise FileNotFoundError(f"Image path is missing for {scene_id}.")
+        if not audio_rel:
+            raise FileNotFoundError(f"Audio path is missing for {scene_id}.")
+
+        image_path = _safe_media_path(project_path, image_rel)
+        audio_path = _safe_media_path(project_path, audio_rel)
+        if not image_path.is_file():
+            raise FileNotFoundError(f"Scene image is missing for {scene_id}: {image_rel}")
+        if not audio_path.is_file():
+            raise FileNotFoundError(f"Scene audio is missing for {scene_id}: {audio_rel}")
+
+        audio_duration = _wav_duration(audio_path)
+        duration = float(scene.get("duration_seconds") or scene.get("duration") or audio_duration)
+        duration = max(1.0, duration)
+
+        record.update(status="waiting_for_worker", duration_seconds=duration, fps=fps, error=None)
+        manifest = read_manifest(project_path) or {}
+        manifest["status"] = "running"
+        manifest["current"] = {"index": index, "total": total, "scene_id": scene_id}
+        manifest["detail"] = f"Waiting for a free Kaggle worker for {scene_id}."
+        write_manifest(project_path, manifest)
+
+        while worker is None:
+            if _CONTROLS.get(project_id) in {"pause", "stop"}:
+                return None
+            worker = await asyncio.to_thread(reserve_worker, project_id, scene_id)
+            if worker is None:
+                if worker_count() == 0:
+                    raise RuntimeError("No Kaggle workers are registered. Register at least one in Video Production.")
+                await asyncio.sleep(2)
+
+        client_config = KaggleComfyClient(worker)
+        record.update(status="uploading", worker_name=worker["name"])
+        manifest = read_manifest(project_path) or {}
+        manifest["detail"] = f"Uploading inputs and queueing {scene_id} on {worker['name']}."
+        write_manifest(project_path, manifest)
+
+        job_id = await client_config.submit_job(
+            client=client,
+            image_path=image_path,
+            audio_path=audio_path,
+            prompt=_scene_prompt(scene, screenplay),
+            duration=duration,
+            fps=fps,
+        )
+        update_worker_job(worker["id"], job_id)
+        record.update(status="running", job_id=job_id, worker_name=worker["name"])
+
+        manifest = read_manifest(project_path) or {}
+        manifest["detail"] = f"Generating {scene_id} on {worker['name']} (job {job_id})."
+        write_manifest(project_path, manifest)
+
+        await client_config.wait_for_video(client, job_id)
+        await client_config.download_video(client, job_id, destination)
+        if not _valid_video(destination):
+            raise RuntimeError(f"Downloaded video for {scene_id} is invalid.")
+
+        record.update(status="completed", job_id=job_id, size_bytes=destination.stat().st_size)
+        record.pop("error", None)
+        logger.info("Completed video scene %s on worker %s", scene_id, worker["name"])
+        return None
+
+    except Exception as exc:
+        logger.exception("Video scene %s failed for project %s", scene_id, project_id)
+        record["status"] = "failed"
+        record["error"] = str(exc)
+        record["previous_video_available"] = _valid_video(destination)
+        return f"{scene_id}: {exc}"
+
+    finally:
+        if worker is not None:
+            offline = False
+            error = record.get("error")
+            if error:
+                offline = any(
+                    token in str(error).lower()
+                    for token in ("connecterror", "connecttimeout", "readtimeout", "remoteprotocolerror")
+                )
+            release_worker(worker["id"], offline=offline, error=error)
+        manifest = read_manifest(project_path) or {}
+        manifest["completed"] = _completed_count(project_path, manifest)
+        manifest["current"] = None
+        write_manifest(project_path, manifest)
+
+
 async def _run_worker(
     project_id: int,
     project_path: Path,
@@ -626,206 +739,56 @@ async def _run_worker(
 
         async with httpx.AsyncClient(timeout=timeout) as client:
 
+            scene_tasks = []
             for index, scene in enumerate(scenes, start=1):
-                scene_id = str(
-                    scene.get("scene_id") or f"SCENE_{index:03d}"
-                )
-
+                scene_id = str(scene.get("scene_id") or f"SCENE_{index:03d}")
                 if only_scene_id and scene_id != only_scene_id:
                     continue
-
                 record = records[scene_id]
-                destination = _safe_media_path(
-                    project_path,
-                    record["video"],
-                )
-
+                destination = _safe_media_path(project_path, record["video"])
                 if (
                     not only_scene_id
                     and record.get("status") == "completed"
                     and _valid_video(destination)
                 ):
                     continue
-
-                command = _CONTROLS.pop(project_id, None)
-
-                if command in {"pause", "stop"}:
-                    status = "paused" if command == "pause" else "stopped"
-
-                    manifest.update(
-                        status=status,
-                        detail=f"{status.title()} at a safe scene boundary.",
-                        current=None,
-                    )
-
-                    manifest["completed"] = _completed_count(
-                        project_path, manifest
-                    )
-
-                    write_manifest(project_path, manifest)
-
-                    _set_stage(
-                        project_id,
-                        StageStatus.paused
-                        if command == "pause"
-                        else StageStatus.stopped,
-                        manifest["detail"],
-                    )
-                    return
-
-                worker = None
-                try:
-                    image_record = image_scenes.get(scene_id) or {}
-                    audio_record = audio_scenes.get(scene_id) or {}
-
-                    image_rel = image_record.get("path")
-                    audio_rel = audio_record.get("audio")
-
-                    if not image_rel:
-                        raise FileNotFoundError(
-                            f"Image path is missing for {scene_id}."
-                        )
-
-                    if not audio_rel:
-                        raise FileNotFoundError(
-                            f"Audio path is missing for {scene_id}."
-                        )
-
-                    image_path = _safe_media_path(project_path, image_rel)
-                    audio_path = _safe_media_path(project_path, audio_rel)
-
-                    if not image_path.is_file():
-                        raise FileNotFoundError(
-                            f"Scene image is missing for {scene_id}: {image_rel}"
-                        )
-
-                    if not audio_path.is_file():
-                        raise FileNotFoundError(
-                            f"Scene audio is missing for {scene_id}: {audio_rel}"
-                        )
-
-                    audio_duration = _wav_duration(audio_path)
-
-                    duration = float(
-                        scene.get("duration_seconds")
-                        or scene.get("duration")
-                        or audio_duration
-                    )
-                    duration = max(1.0, duration)
-
-                    manifest.update(
-                        status="running",
-                        current={
-                            "index": index,
-                            "total": len(scenes),
-                            "scene_id": scene_id,
-                        },
-                        detail=f"Uploading inputs and queueing {scene_id} on Kaggle.",
-                    )
-
-                    record.update(
-                        status="uploading",
-                        duration_seconds=duration,
+                scene_tasks.append(
+                    _process_video_scene(
+                        project_id=project_id,
+                        project_path=project_path,
+                        screenplay=screenplay,
+                        scene=scene,
+                        index=index,
+                        total=len(scenes),
+                        record=record,
+                        image_scenes=image_scenes,
+                        audio_scenes=audio_scenes,
                         fps=fps,
-                        error=None,
-                    )
-
-                    write_manifest(project_path, manifest)
-
-                    worker = None
-                    while worker is None:
-                        worker = await asyncio.to_thread(
-                            reserve_worker, project_id, scene_id
-                        )
-                        if worker is None:
-                            if worker_count() == 0:
-                                raise RuntimeError(
-                                    "No Kaggle workers are registered. Register at least one in Video Production."
-                                )
-                            if _CONTROLS.get(project_id) in {"pause", "stop"}:
-                                raise RuntimeError(
-                                    "Video generation control requested while waiting for a free worker."
-                                )
-                            manifest["detail"] = f"{scene_id} is waiting for a free Kaggle worker."
-                            write_manifest(project_path, manifest)
-                            await asyncio.sleep(3)
-
-                    client_config = KaggleComfyClient(worker)
-                    job_id = await client_config.submit_job(
                         client=client,
-                        image_path=image_path,
-                        audio_path=audio_path,
-                        prompt=_scene_prompt(scene, screenplay),
-                        duration=duration,
-                        fps=fps,
                     )
-
-                    update_worker_job(worker["id"], job_id)
-                    record.update(
-                        status="running",
-                        job_id=job_id,
-                        worker_name=worker["name"],
-                    )
-
-                    manifest["detail"] = (
-                        f"Generating {scene_id} on Kaggle (job {job_id})."
-                    )
-                    write_manifest(project_path, manifest)
-
-                    await client_config.wait_for_video(client, job_id)
-
-                    await client_config.download_video(
-                        client,
-                        job_id,
-                        destination,
-                    )
-
-                    if not _valid_video(destination):
-                        raise RuntimeError(
-                            f"Downloaded video for {scene_id} is invalid."
-                        )
-
-                    record.update(
-                        status="completed",
-                        job_id=job_id,
-                        size_bytes=destination.stat().st_size,
-                    )
-                    record.pop("error", None)
-
-                    logger.info("Completed video scene %s", scene_id)
-                    release_worker(worker["id"])
-                    worker = None
-
-                except Exception as scene_exc:
-                    if worker is not None:
-                        offline = isinstance(
-                            scene_exc,
-                            (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
-                        )
-                        release_worker(worker["id"], offline=offline, error=str(scene_exc))
-                        worker = None
-                    logger.exception(
-                        "Video scene %s failed for project %s",
-                        scene_id,
-                        project_id,
-                    )
-
-                    record["status"] = "failed"
-                    record["error"] = str(scene_exc)
-                    record["previous_video_available"] = _valid_video(
-                        destination
-                    )
-                    failures.append(f"{scene_id}: {scene_exc}")
-
-                    manifest["detail"] = (
-                        f"{scene_id} failed. Continuing with the next scene."
-                    )
-
-                manifest["completed"] = _completed_count(
-                    project_path, manifest
                 )
-                manifest["current"] = None
+
+            # Every scene is scheduled concurrently; atomic DB reservations cap
+            # actual Kaggle work at the number of registered workers (maximum five).
+            results = await asyncio.gather(*scene_tasks)
+            failures.extend(item for item in results if item)
+
+            command = _CONTROLS.pop(project_id, None)
+            if command in {"pause", "stop"}:
+                status = "paused" if command == "pause" else "stopped"
+                manifest.update(
+                    status=status,
+                    detail=f"{status.title()} after all active scene clips finished.",
+                    current=None,
+                )
+                manifest["completed"] = _completed_count(project_path, manifest)
                 write_manifest(project_path, manifest)
+                _set_stage(
+                    project_id,
+                    StageStatus.paused if command == "pause" else StageStatus.stopped,
+                    manifest["detail"],
+                )
+                return
 
         manifest["completed"] = _completed_count(project_path, manifest)
 
