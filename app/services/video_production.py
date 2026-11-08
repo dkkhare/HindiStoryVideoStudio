@@ -601,7 +601,6 @@ async def _process_video_scene(
 
         client_config = KaggleComfyClient(worker)
         record.update(status="uploading", worker_name=worker["name"])
-        manifest = read_manifest(project_path) or {}
         manifest["detail"] = f"Uploading inputs and queueing {scene_id} on {worker['name']}."
         write_manifest(project_path, manifest)
 
@@ -616,7 +615,6 @@ async def _process_video_scene(
         update_worker_job(worker["id"], job_id)
         record.update(status="running", job_id=job_id, worker_name=worker["name"])
 
-        manifest = read_manifest(project_path) or {}
         manifest["detail"] = f"Generating {scene_id} on {worker['name']} (job {job_id})."
         write_manifest(project_path, manifest)
 
