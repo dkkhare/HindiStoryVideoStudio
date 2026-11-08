@@ -633,7 +633,7 @@ async def _process_video_scene(
         worker_offline = isinstance(
             exc,
             (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError),
-        )
+        ) or "lost connection to kaggle" in str(exc).lower()
         logger.exception("Video scene %s failed for project %s", scene_id, project_id)
         record["status"] = "failed"
         record["error"] = str(exc)
