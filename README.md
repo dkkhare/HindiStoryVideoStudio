@@ -16,7 +16,7 @@ Gemini TTS or F5-TTS audio, ComfyUI/LTX-2.5 video generation, and FFmpeg post-pr
    Copy-Item .env.example .env
    ```
 
-3. Add `GEMINI_API_KEY` to `.env`. Configure ComfyUI and F5-TTS endpoints.
+3. Add `GEMINI_API_KEY` and a unique `SECRET_KEY` to `.env`. Generate a secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Keep this value stable: it encrypts the Kaggle API keys stored in SQLite. Configure your local Voicebox/F5-TTS endpoint as needed.
 4. Start the server:
 
    ```powershell
