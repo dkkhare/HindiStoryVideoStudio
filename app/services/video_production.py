@@ -14,7 +14,6 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
 from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
-from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
 
 logger = logging.getLogger(__name__)
 
