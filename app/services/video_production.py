@@ -674,6 +674,7 @@ async def _run_worker(
                     )
                     return
 
+                worker = None
                 try:
                     image_record = image_scenes.get(scene_id) or {}
                     audio_record = audio_scenes.get(scene_id) or {}
