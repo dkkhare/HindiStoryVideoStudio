@@ -16,9 +16,7 @@ class Settings(BaseSettings):
     gemini_image_model: str = "gemini-3.1-flash-image"
     gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
 
-    comfyui_base_url: str = "https://prot-ask-metal-physiology.trycloudflare.com"
     comfyui_client_id: str = "hindi-story-studio"
-    comfyui_api_key: str = "GGI_I5hPg5zw3KOtZ8o3Uscga4v1ymGd"
     comfyui_request_timeout_seconds: int = 2700
     comfyui_workflow_json: Path = Path("./workflows/ltx25_i2v_api.json")
     comfyui_output_dir: str = ""
@@ -38,7 +36,7 @@ class Settings(BaseSettings):
     default_video_scene_seconds: int = 15
     max_parallel_image_jobs: int = 2
     max_parallel_audio_jobs: int = 1
-    max_parallel_video_jobs: int = 1
+    max_parallel_video_jobs: int = 5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

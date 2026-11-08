@@ -1,4 +1,109 @@
 
+
+/* ---------------- GLOBAL KAGGLE WORKER POOL ---------------- */
+
+async function refreshKaggleWorkers() {
+    const container = document.getElementById("kaggle-worker-list");
+    if (!container) return;
+    try {
+        const data = await api("/api/kaggle/workers");
+        const workers = data.workers || [];
+        container.innerHTML = "";
+        const summary = document.createElement("p");
+        summary.className = "message";
+        summary.textContent = `${workers.length} / ${data.limit || 5} workers registered · one active scene per worker`;
+        container.appendChild(summary);
+
+        if (!workers.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty";
+            empty.textContent = "No Kaggle workers registered yet.";
+            container.appendChild(empty);
+            return;
+        }
+
+        for (const worker of workers) {
+            const card = document.createElement("div");
+            card.className = "kaggle-worker-card";
+            const info = document.createElement("div");
+            const name = document.createElement("strong");
+            name.textContent = worker.name;
+            const url = document.createElement("small");
+            url.textContent = worker.api_url;
+            const workflow = document.createElement("small");
+            workflow.textContent = `Workflow: ${worker.workflow_id}`;
+            info.append(name, url, workflow);
+            const status = document.createElement("span");
+            status.className = `worker-status worker-${String(worker.status).toLowerCase()}`;
+            status.textContent = worker.status;
+            card.append(info, status);
+            if (worker.current_scene_id || worker.current_job_id) {
+                const job = document.createElement("small");
+                job.textContent = `Project ${worker.current_project_id || ""} · ${worker.current_scene_id || ""} · Job ${worker.current_job_id || "submitting"}`;
+                card.appendChild(job);
+            }
+            if (worker.last_error) {
+                const error = document.createElement("small");
+                error.className = "worker-error";
+                error.textContent = worker.last_error;
+                card.appendChild(error);
+            }
+            const remove = createButton("Remove", async button => {
+                button.disabled = true;
+                try {
+                    await api(`/api/kaggle/workers/${worker.id}`, { method: "DELETE" });
+                    await refreshKaggleWorkers();
+                } catch (err) {
+                    button.disabled = false;
+                    const message = document.getElementById("kaggle-worker-message");
+                    if (message) message.textContent = err.message;
+                }
+            });
+            remove.className = "secondary";
+            card.appendChild(remove);
+            container.appendChild(card);
+        }
+    } catch (error) {
+        container.textContent = error.message;
+    }
+}
+
+function initializeKaggleWorkerForm() {
+    const form = document.getElementById("kaggle-worker-form");
+    if (!form) return;
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const message = document.getElementById("kaggle-worker-message");
+        const button = form.querySelector('button[type="submit"]');
+        const values = new FormData(form);
+        button.disabled = true;
+        button.textContent = "Checking server and registering workflow…";
+        if (message) message.textContent = "";
+        try {
+            await api("/api/kaggle/workers/register", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: values.get("name"),
+                    api_url: values.get("api_url"),
+                    api_key: values.get("api_key")
+                })
+            });
+            form.reset();
+            if (message) message.textContent = "Kaggle worker registered successfully.";
+            await refreshKaggleWorkers();
+        } catch (error) {
+            if (message) message.textContent = error.message;
+        } finally {
+            button.disabled = false;
+            button.textContent = "Register Kaggle Workflow";
+        }
+    });
+    refreshKaggleWorkers();
+    setInterval(refreshKaggleWorkers, 15000);
+}
+
+
 const form = document.getElementById("project-form");
 const message = document.getElementById("message");
 const list = document.getElementById("projects");
@@ -42,202 +147,508 @@ function isActive(status) {
     return ACTIVE_STATUSES.includes(status);
 }
 
+let projectsCache = [];
+let activeProjectId = null;
+let activeProjectSection = "screenplay";
+
+const PROJECT_SECTIONS = [
+    ["screenplay", "Screenplay", "▤"],
+    ["images", "Images", "▧"],
+    ["audio", "Audio", "♫"],
+    ["video-clips", "Video Clips", "▶"],
+    ["story-video", "Story Video", "▣"]
+];
+
+function setPage(page, label) {
+    document.querySelectorAll(".page-view").forEach(view => {
+        view.hidden = view.dataset.page !== page;
+    });
+    document.querySelectorAll("[data-page-link]").forEach(link => {
+        link.classList.toggle("active", link.dataset.pageLink === page);
+    });
+    document.querySelectorAll(".project-nav-item").forEach(item => {
+        item.classList.toggle("is-active", page === "project" && String(item.dataset.projectId) === String(activeProjectId));
+    });
+    const breadcrumb = document.getElementById("breadcrumb-current");
+    if (breadcrumb) breadcrumb.textContent = label || ({
+        overview: "Overview", create: "New story", workers: "Render workers"
+    }[page] || "Project");
+}
+
+function selectProject(projectId, section = "screenplay") {
+    activeProjectId = Number(projectId);
+    activeProjectSection = section;
+    const project = projectsCache.find(item => Number(item.id) === activeProjectId);
+    if (!project) return;
+    const sectionLabel = PROJECT_SECTIONS.find(item => item[0] === section)?.[1] || "Screenplay";
+    setPage("project", project.title || `Project ${project.id}`);
+    renderSelectedProjectView();
+    document.querySelectorAll(".project-nav-item").forEach(item => {
+        item.classList.toggle("is-active", String(item.dataset.projectId) === String(activeProjectId));
+        item.querySelectorAll(".project-submenu button").forEach(button => {
+            button.classList.toggle("active", button.dataset.section === section);
+        });
+    });
+    const breadcrumb = document.getElementById("breadcrumb-current");
+    if (breadcrumb) breadcrumb.textContent = `${project.title || "Project"} / ${sectionLabel}`;
+}
+
+function renderProjectNavigation() {
+    const container = document.getElementById("project-nav-list");
+    if (!container) return;
+    container.innerHTML = "";
+    if (!projectsCache.length) {
+        const empty = document.createElement("p");
+        empty.className = "project-nav-empty";
+        empty.textContent = "No projects yet";
+        container.appendChild(empty);
+        return;
+    }
+
+    for (const project of projectsCache) {
+        const item = document.createElement("div");
+        item.className = "project-nav-item";
+        item.dataset.projectId = project.id;
+
+        const projectButton = document.createElement("button");
+        projectButton.type = "button";
+        projectButton.className = "project-nav-project";
+        projectButton.title = project.title || `Project ${project.id}`;
+
+        const name = document.createElement("span");
+        name.className = "project-name";
+        name.textContent = project.title || `Project ${project.id}`;
+        const arrow = document.createElement("span");
+        arrow.className = "project-arrow";
+        arrow.textContent = "›";
+        projectButton.append(name, arrow);
+        projectButton.addEventListener("click", () => selectProject(project.id, "screenplay"));
+
+        const submenu = document.createElement("div");
+        submenu.className = "project-submenu";
+        for (const [key, label, mark] of PROJECT_SECTIONS) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.dataset.section = key;
+            const icon = document.createElement("span");
+            icon.className = "submenu-mark";
+            icon.textContent = mark;
+            const text = document.createElement("span");
+            text.textContent = label;
+            button.append(icon, text);
+            button.addEventListener("click", event => {
+                event.stopPropagation();
+                selectProject(project.id, key);
+            });
+            submenu.appendChild(button);
+        }
+        item.append(projectButton, submenu);
+        container.appendChild(item);
+    }
+}
+
 async function loadProjects() {
-    if (!list) return;
-
-    audioPollingEnabled = false;
-    list.textContent = "Loading projects...";
-
+    const container = document.getElementById("projects");
     try {
-        const projects = await api("/api/projects");
-        list.innerHTML = "";
+        projectsCache = await api("/api/projects");
+        if (!Array.isArray(projectsCache)) projectsCache = [];
+        renderProjectNavigation();
 
-        if (!Array.isArray(projects) || !projects.length) {
-            list.textContent = "No projects yet. Create your first story above.";
+        if (!projectsCache.length) {
+            activeProjectId = null;
+            if (container) container.textContent = "No projects yet.";
+            if (document.getElementById("project-detail-view")?.hidden === false) {
+                setPage("overview");
+            }
             return;
         }
 
-        for (const project of projects) {
-            await renderProject(project);
+        if (!projectsCache.some(item => Number(item.id) === Number(activeProjectId))) {
+            activeProjectId = null;
+        }
+        if (activeProjectId !== null) {
+            await renderSelectedProjectView();
         }
     } catch (error) {
-        list.textContent = error.message;
+        if (container) container.textContent = error.message;
+        const nav = document.getElementById("project-nav-list");
+        if (nav) nav.textContent = error.message;
     }
 }
 
-async function renderProject(project) {
-    const card = document.createElement("div");
-    card.className = "project";
+function addProjectPanel(title, description = "") {
+    const root = document.getElementById("project-detail-content");
+    root.innerHTML = "";
 
+    const project = projectsCache.find(item => Number(item.id) === Number(activeProjectId));
+    if (!project) return null;
+
+    const heading = document.createElement("div");
+    heading.className = "project-detail-heading";
+    const copy = document.createElement("div");
+    const eyebrow = document.createElement("div");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = "PROJECT WORKSPACE";
+    const h1 = document.createElement("h1");
+    h1.textContent = project.title || `Project ${project.id}`;
+    const p = document.createElement("p");
+    p.textContent = `${project.target_duration_minutes || "—"} min · ${project.language || "Language not set"} · ${project.status || "Draft"}`;
+    copy.append(eyebrow, h1, p);
+    heading.appendChild(copy);
+    root.appendChild(heading);
+
+    const tabs = document.createElement("div");
+    tabs.className = "project-stage-tabs";
+    for (const [key, label] of PROJECT_SECTIONS) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.classList.toggle("active", key === activeProjectSection);
+        button.addEventListener("click", () => selectProject(project.id, key));
+        tabs.appendChild(button);
+    }
+    root.appendChild(tabs);
+
+    const panel = document.createElement("section");
+    panel.className = "project-content-panel";
+    root.appendChild(panel);
+    return { project, panel };
+}
+
+async function getProjectStages(projectId) {
+    const stages = await api(`/api/projects/${projectId}/stages`);
+    return Object.fromEntries(stages.map(stage => [stage.stage_key, stage]));
+}
+
+async function renderSelectedProjectView() {
+    const selected = addProjectPanel(
+        PROJECT_SECTIONS.find(item => item[0] === activeProjectSection)?.[1] || "Screenplay"
+    );
+    if (!selected) return;
+    const { project, panel } = selected;
+    const projectId = project.id;
     const heading = document.createElement("h3");
-    heading.textContent = project.title || `Project ${project.id}`;
-
-    const details = document.createElement("p");
-    details.textContent =
-        `${project.target_duration_minutes || ""} minutes · ${project.status || ""}`;
-
-    const workflow = document.createElement("div");
-    workflow.className = "workflow";
-
-    card.append(heading, details, workflow);
-    list.appendChild(card);
+    heading.textContent = PROJECT_SECTIONS.find(item => item[0] === activeProjectSection)?.[1] || "Screenplay";
+    panel.appendChild(heading);
 
     try {
-        const stages = await api(`/api/projects/${project.id}/stages`);
-        const status = Object.fromEntries(
-            stages.map(stage => [stage.stage_key, stage])
-        );
-
-        const screenplay = status.screenplay;
-        const references = status.character_bible;
-        const scenes = status.scene_images;
-        const audio = status.audio;
-
-        if (!screenplay || ["pending", "failed"].includes(screenplay.status)) {
-            workflow.appendChild(createButton(
-                "Generate Screenplay",
-                button => runAction(
-                    button,
-                    project.id,
-                    "screenplay/generate",
-                    "Generating screenplay..."
-                )
-            ));
-            return;
+        const stages = await getProjectStages(projectId);
+        if (activeProjectSection === "screenplay") {
+            await renderScreenplayView(panel, project, stages.screenplay);
+        } else if (activeProjectSection === "images") {
+            await renderImagesView(panel, project, stages);
+        } else if (activeProjectSection === "audio") {
+            await renderAudioStage(panel, project, stages.audio);
+        } else if (activeProjectSection === "video-clips") {
+            await renderVideoStage(panel, project, stages.video);
+        } else if (activeProjectSection === "story-video") {
+            await renderStoryVideoView(panel, project);
         }
-
-        if (screenplay.status === "running") {
-            setMessage(workflow, "Screenplay is being generated...");
-            return;
-        }
-
-        if (screenplay.status === "waiting_approval") {
-            setMessage(workflow, "Next step: Review and approve your screenplay.");
-
-            const reviewButton = createButton(
-                "Review Screenplay",
-                async button => {
-                    button.disabled = true;
-
-                    try {
-                        const data = await api(
-                            `/api/projects/${project.id}/screenplay`
-                        );
-
-                        const existing = workflow.querySelector(
-                            ".screenplay-preview"
-                        );
-
-                        if (existing) {
-                            existing.remove();
-                            button.textContent = "Review Screenplay";
-                        } else {
-                            const pre = document.createElement("pre");
-                            pre.className = "screenplay-preview";
-                            pre.textContent = JSON.stringify(
-                                data.screenplay,
-                                null,
-                                2
-                            );
-                            workflow.appendChild(pre);
-                            button.textContent = "Hide Screenplay";
-                        }
-                    } catch (error) {
-                        setMessage(workflow, error.message);
-                    } finally {
-                        button.disabled = false;
-                    }
-                }
-            );
-
-            workflow.appendChild(reviewButton);
-
-            workflow.appendChild(createButton(
-                "Approve Screenplay",
-                button => runAction(
-                    button,
-                    project.id,
-                    "screenplay/approve",
-                    "Approving screenplay..."
-                )
-            ));
-            return;
-        }
-
-        if (screenplay.status === "completed") {
-            await renderAudioStage(workflow, project, audio);
-
-            if (!references || ["pending", "failed"].includes(references.status)) {
-                setMessage(
-                    workflow,
-                    "Screenplay approved. Next: Generate visual references."
-                );
-
-                workflow.appendChild(createButton(
-                    "Generate Character, Prop & Location References",
-                    button => runAction(
-                        button,
-                        project.id,
-                        "references/generate",
-                        "Generating visual references..."
-                    )
-                ));
-                return;
-            }
-
-            if (references.status === "running") {
-                setMessage(
-                    workflow,
-                    "Generating character, prop and location references..."
-                );
-                return;
-            }
-
-            if (references.status === "completed") {
-                if (!scenes || ["pending", "failed"].includes(scenes.status)) {
-                    setMessage(
-                        workflow,
-                        "Visual references ready. Next: Generate scene images."
-                    );
-
-                    workflow.appendChild(createButton(
-                        "Generate Scene Images",
-                        button => runAction(
-                            button,
-                            project.id,
-                            "images/generate",
-                            "Generating scene images..."
-                        )
-                    ));
-                    return;
-                }
-
-                if (scenes.status === "running") {
-                    setMessage(workflow, "Generating scene images...");
-                    return;
-                }
-
-                if (scenes.status === "completed") {
-                    if (audio?.status === "completed") {
-                        await renderVideoStage(workflow, project, status.video);
-                    } else {
-                        setMessage(
-                            workflow,
-                            "Scene images are ready. Complete scene audio to enable video generation."
-                        );
-                    }
-                    return;
-                }
-            }
-        }
-
-        setMessage(workflow, "Please check the production stage status.");
-
     } catch (error) {
-        setMessage(workflow, `Could not load workflow: ${error.message}`);
+        setMessage(panel, `Could not load this project section: ${error.message}`);
     }
 }
 
+async function renderScreenplayView(panel, project, stage) {
+    let data = null;
+    try {
+        data = await api(`/api/projects/${project.id}/screenplay`);
+    } catch (error) {
+        setMessage(panel, `Could not load the saved screenplay: ${error.message}`);
+        return;
+    }
+
+    const screenplay = data?.screenplay || null;
+    const status = stage?.status || "pending";
+    if (!screenplay) {
+        const detail = document.createElement("p");
+        detail.className = "message";
+        detail.textContent = stage?.detail || "This project does not have a saved screenplay yet.";
+        panel.appendChild(detail);
+        const button = createButton(
+            status === "running" ? "Screenplay is generating…" : "Generate screenplay",
+            async btn => {
+                btn.disabled = true;
+                btn.textContent = "Generating screenplay…";
+                try {
+                    await api(`/api/projects/${project.id}/screenplay/generate`, { method: "POST" });
+                    await loadProjects();
+                } catch (error) {
+                    btn.disabled = false;
+                    btn.textContent = "Generate screenplay";
+                    setMessage(panel, error.message);
+                }
+            }
+        );
+        button.disabled = status === "running";
+        button.className = "primary-button";
+        panel.appendChild(button);
+        return;
+    }
+
+    if (screenplay.logline) {
+        const logline = document.createElement("p");
+        logline.className = "screenplay-logline";
+        logline.textContent = screenplay.logline;
+        panel.appendChild(logline);
+    }
+    if (screenplay.characters?.length) {
+        const sub = document.createElement("h4");
+        sub.className = "section-subheading";
+        sub.textContent = "Characters";
+        panel.appendChild(sub);
+        screenplay.characters.forEach(character => {
+            const p = document.createElement("p");
+            p.textContent = `${character.name || character.character_id}: ${character.description || ""}`;
+            panel.appendChild(p);
+        });
+    }
+    const scenesTitle = document.createElement("h4");
+    scenesTitle.className = "section-subheading";
+    scenesTitle.textContent = `Scenes (${(screenplay.scenes || []).length})`;
+    panel.appendChild(scenesTitle);
+    (screenplay.scenes || []).forEach((scene, index) => {
+        const card = document.createElement("div");
+        card.className = "screenplay-scene";
+        const title = document.createElement("h4");
+        title.textContent = `${scene.scene_id || `Scene ${index + 1}`} · ${scene.title || scene.location || ""}`;
+        const summary = document.createElement("p");
+        summary.textContent = scene.summary || scene.description || "";
+        card.append(title, summary);
+        const dialogueLines = scene.dialogue_and_narration || scene.dialogue || [];
+        if (dialogueLines.length) {
+            const dialogue = document.createElement("p");
+            dialogue.textContent = dialogueLines.map(line => `${line.speaker || "Narrator"}: ${line.text || ""}`).join("\n");
+            card.appendChild(dialogue);
+        }
+        panel.appendChild(card);
+    });
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "View complete screenplay JSON";
+    const pre = document.createElement("pre");
+    pre.className = "screenplay-json";
+    pre.textContent = JSON.stringify(screenplay, null, 2);
+    details.append(summary, pre);
+    panel.appendChild(details);
+
+    if (status === "waiting_approval") {
+        const approve = createButton("Approve screenplay", async btn => {
+            btn.disabled = true;
+            try {
+                await api(`/api/projects/${project.id}/screenplay/approve`, { method: "POST" });
+                await loadProjects();
+            } catch (error) {
+                btn.disabled = false;
+                setMessage(panel, error.message);
+            }
+        });
+        approve.className = "primary-button";
+        panel.appendChild(approve);
+    } else if (status === "completed") {
+        const approved = document.createElement("p");
+        approved.className = "message";
+        approved.textContent = "Screenplay approved. Continue with Images when ready.";
+        panel.appendChild(approved);
+    }
+}
+
+function addImageAssetCard(container, projectId, title, record) {
+    const card = document.createElement("div");
+    card.className = "image-asset-card";
+    const path = record?.path;
+    if (path && record.status === "completed") {
+        const image = document.createElement("img");
+        image.loading = "lazy";
+        image.src = `/api/projects/${projectId}/assets/${path}`;
+        image.alt = title;
+        card.appendChild(image);
+    }
+    const info = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = title;
+    const status = document.createElement("small");
+    status.textContent = record?.status || "pending";
+    info.append(name, status);
+    if (record?.error) {
+        const error = document.createElement("small");
+        error.textContent = record.error;
+        info.appendChild(error);
+    }
+    card.appendChild(info);
+    container.appendChild(card);
+}
+
+async function renderImagesView(panel, project, stages) {
+    const imageResponse = await api(`/api/projects/${project.id}/images/status`).catch(() => null);
+    const status = imageResponse?.status || imageResponse || null;
+    const refs = status?.references || {};
+    const sceneImages = status?.scenes || {};
+    const refStatus = refs.status || stages.character_bible?.status || "pending";
+    const sceneStatus = stages.scene_images?.status || "pending";
+
+    const summary = document.createElement("p");
+    summary.className = "message";
+    const stats = status?.statistics || {};
+    summary.textContent = status
+        ? `Image status: ${status.status || "pending"} · References: ${stats.references_completed || 0}/${stats.references_total || 0} · Scene images: ${stats.scenes_completed || 0}/${stats.scenes_total || 0}`
+        : "No image manifest has been created yet.";
+    panel.appendChild(summary);
+
+    if (refStatus !== "completed") {
+        const button = createButton(
+            refStatus === "running" ? "Generating references…" : "Generate character, prop & location references",
+            async btn => {
+                btn.disabled = true;
+                try {
+                    await api(`/api/projects/${project.id}/references/generate`, { method: "POST" });
+                    await loadProjects();
+                } catch (error) {
+                    btn.disabled = false;
+                    setMessage(panel, error.message);
+                }
+            }
+        );
+        button.disabled = refStatus === "running";
+        button.className = "primary-button";
+        panel.appendChild(button);
+    }
+
+    const groups = [
+        ["characters", "Character references"],
+        ["props", "Prop references"],
+        ["locations", "Location references"]
+    ];
+    for (const [key, label] of groups) {
+        const records = Object.entries(refs[key] || {});
+        if (!records.length) continue;
+        const title = document.createElement("h4");
+        title.className = "section-subheading";
+        title.textContent = label;
+        panel.appendChild(title);
+        const grid = document.createElement("div");
+        grid.className = "image-asset-grid";
+        records.forEach(([id, record]) => addImageAssetCard(grid, project.id, record.name || id, record));
+        panel.appendChild(grid);
+    }
+
+    if (refStatus === "completed" && sceneStatus !== "completed") {
+        const button = createButton(
+            sceneStatus === "running" ? "Generating scene images…" : "Generate scene images",
+            async btn => {
+                btn.disabled = true;
+                try {
+                    await api(`/api/projects/${project.id}/images/generate`, { method: "POST" });
+                    await loadProjects();
+                } catch (error) {
+                    btn.disabled = false;
+                    setMessage(panel, error.message);
+                }
+            }
+        );
+        button.disabled = sceneStatus === "running";
+        button.className = "primary-button";
+        panel.appendChild(button);
+    }
+
+    const sceneRecords = Object.entries(sceneImages);
+    if (sceneRecords.length) {
+        const title = document.createElement("h4");
+        title.className = "section-subheading";
+        title.textContent = "Scene images";
+        panel.appendChild(title);
+        const grid = document.createElement("div");
+        grid.className = "image-asset-grid";
+        sceneRecords.forEach(([id, record]) => addImageAssetCard(grid, project.id, id, record));
+        panel.appendChild(grid);
+    }
+}
+
+async function renderStoryVideoView(panel, project) {
+    const manifest = await api(`/api/projects/${project.id}/video`).catch(() => null);
+    const finalPath = manifest?.final_video || manifest?.story_video || manifest?.output;
+    if (finalPath) {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.src = `/api/projects/${project.id}/assets/${finalPath}`;
+        video.className = "story-video-player";
+        video.style.width = "100%";
+        video.style.maxWidth = "1000px";
+        panel.appendChild(video);
+        const link = document.createElement("a");
+        link.href = video.src;
+        link.textContent = "Open / download final story video";
+        link.target = "_blank";
+        panel.appendChild(link);
+        return;
+    }
+
+    const scenes = normalizeVideoRecords(manifest).filter(scene =>
+        scene.status === "completed" && (scene.video || scene.path)
+    );
+    if (scenes.length) {
+        const note = document.createElement("p");
+        note.className = "message";
+        note.textContent = `This project has ${scenes.length} completed scene clip(s). Play them below in screenplay order. A single merged film is not yet present.`;
+        panel.appendChild(note);
+
+        for (const scene of scenes) {
+            const card = document.createElement("div");
+            card.className = "screenplay-scene";
+            const title = document.createElement("h4");
+            title.textContent = scene.title || scene.scene_id || "Scene clip";
+            const video = document.createElement("video");
+            video.controls = true;
+            video.preload = "metadata";
+            video.src = `/api/projects/${project.id}/assets/${scene.video || scene.path}`;
+            video.style.width = "100%";
+            video.style.maxWidth = "900px";
+            card.append(title, video);
+            const link = document.createElement("a");
+            link.href = video.src;
+            link.textContent = "Open / download this clip";
+            link.target = "_blank";
+            card.appendChild(link);
+            panel.appendChild(card);
+        }
+        return;
+    }
+
+    const empty = document.createElement("div");
+    empty.className = "story-video-empty";
+    const strong = document.createElement("strong");
+    strong.textContent = "No completed story video is saved yet";
+    const p = document.createElement("p");
+    p.textContent = manifest?.detail || "After scene clips are generated, they will be listed here. A final merged story video can be shown here when the assembly step creates it.";
+    empty.append(strong, p);
+    panel.appendChild(empty);
+    const button = createButton("Open Video Clips", () => selectProject(project.id, "video-clips"));
+    button.className = "secondary-button";
+    panel.appendChild(button);
+}
+
+document.querySelectorAll("[data-page-link]").forEach(button => {
+    button.addEventListener("click", () => {
+        const page = button.dataset.pageLink;
+        setPage(page);
+    });
+});
+const projectToggle = document.getElementById("my-projects-toggle");
+if (projectToggle) {
+    projectToggle.addEventListener("click", () => {
+        const nav = document.getElementById("project-nav");
+        const open = nav.classList.toggle("is-open");
+        projectToggle.setAttribute("aria-expanded", String(open));
+    });
+}
+document.querySelectorAll("[data-project-shortcut]").forEach(button => {
+    button.addEventListener("click", () => {
+        if (projectsCache.length) selectProject(projectsCache[0].id, "screenplay");
+        else setPage("create");
+    });
+});
 async function runAction(button, projectId, endpoint, progressText) {
     button.disabled = true;
     const originalText = button.textContent;
@@ -252,7 +663,7 @@ async function runAction(button, projectId, endpoint, progressText) {
         button.disabled = false;
         button.textContent = originalText;
 
-        const card = button.closest(".project");
+        const card = button.closest(".project") || document.getElementById("project-detail-content");
         if (card) setMessage(card, error.message);
     }
 }
@@ -279,7 +690,10 @@ if (form) {
             if (message) message.textContent = `Created project #${data.id}`;
 
             form.reset();
+            activeProjectId = Number(data.id);
+            activeProjectSection = "screenplay";
             await loadProjects();
+            selectProject(data.id, "screenplay");
 
         } catch (error) {
             if (message) message.textContent = error.message;
@@ -318,7 +732,12 @@ async function renderAudioStage(workflow, project, audioStage) {
         return;
     }
 
-    const screenplay = screenplayData.screenplay || {};
+    const screenplay = screenplayData.screenplay || null;
+    if (!screenplay) {
+        setMessage(panel, "Generate the screenplay first. Once it is saved, voice assignments and generated audio will appear here.");
+        workflow.appendChild(panel);
+        return;
+    }
     const characters = screenplay.characters || [];
 
     const speakers = characters.map(character => ({
@@ -1192,4 +1611,6 @@ setInterval(async () => {
     }
 }, 3000);
 
+initializeKaggleWorkerForm();
+setPage("overview");
 loadProjects();

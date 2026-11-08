@@ -2,6 +2,7 @@
 import json
 import logging
 import wave
+import httpx
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,6 +23,7 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
+from app.services.kaggle_workers import register_worker, list_workers, worker_count
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
@@ -42,6 +44,45 @@ from app.services.audio_production import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+@router.get("/kaggle/workers")
+def get_kaggle_workers():
+    return {"workers": list_workers(), "limit": 5}
+
+
+@router.post("/kaggle/workers/register")
+async def register_kaggle_worker(request: Request):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Worker registration payload must be a JSON object.")
+        worker = await register_worker(
+            name=str(payload.get("name") or ""),
+            api_url=str(payload.get("api_url") or ""),
+            api_key=str(payload.get("api_key") or ""),
+        )
+        return {"ok": True, "worker": worker}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Kaggle registration request failed: {exc}") from exc
+    except Exception as exc:
+        logger.exception("Kaggle worker registration failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/kaggle/workers/{worker_id}")
+def delete_kaggle_worker(worker_id: int, db: Session = Depends(get_db)):
+    from app.models import KaggleWorker
+    worker = db.get(KaggleWorker, worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Kaggle worker not found.")
+    if worker.status == "BUSY":
+        raise HTTPException(status_code=409, detail="Cannot remove a worker while it is processing a scene.")
+    db.delete(worker)
+    db.commit()
+    return {"ok": True}
+
 
 STAGES = [
     "screenplay",
@@ -250,17 +291,28 @@ async def generate_screenplay(
 def get_screenplay(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
 
-    if not project.screenplay_json:
-        raise HTTPException(
-            status_code=404,
-            detail="Screenplay has not been generated yet.",
-        )
+    # Recover screenplay data from disk if the DB column is empty.
+    screenplay_data = None
+    if project.screenplay_json:
+        try:
+            screenplay_data = json.loads(project.screenplay_json)
+        except json.JSONDecodeError:
+            logger.exception("Invalid screenplay JSON in database for project %s", project.id)
+
+    screenplay_file = Path(project.project_path) / "screenplay.json"
+    if screenplay_data is None and screenplay_file.is_file():
+        try:
+            screenplay_data = json.loads(screenplay_file.read_text(encoding="utf-8"))
+            project.screenplay_json = json.dumps(screenplay_data, ensure_ascii=False, indent=2)
+            db.commit()
+        except (OSError, json.JSONDecodeError):
+            logger.exception("Could not recover screenplay file for project %s", project.id)
 
     return {
         "project_id": project.id,
-        "screenplay": json.loads(project.screenplay_json),
+        "generated": screenplay_data is not None,
+        "screenplay": screenplay_data,
     }
-
 
 @router.post("/projects/{project_id}/screenplay/approve")
 def approve_screenplay(
@@ -668,7 +720,16 @@ def get_project_audio(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
     manifest = read_manifest(Path(project.project_path))
     if not manifest:
-        raise HTTPException(status_code=404, detail="No audio checkpoint has been created yet.")
+        return {
+            "project_id": project.id,
+            "status": "pending",
+            "detail": "Audio has not been generated yet.",
+            "segments": [],
+            "scenes": [],
+            "voice_assignments": [],
+            "completed": 0,
+            "total": 0,
+        }
 
     if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not audio_worker_active(project_id):
         manifest["status"] = "paused"
@@ -692,10 +753,8 @@ async def generate_project_video(
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
     if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
@@ -757,7 +816,14 @@ def get_project_video(project_id: int, db: Session = Depends(get_db)):
     manifest = read_video_manifest(project_path)
 
     if not manifest:
-        raise HTTPException(status_code=404, detail="No video generation manifest exists yet.")
+        return {
+            "project_id": project.id,
+            "status": "pending",
+            "detail": "Scene video clips have not been generated yet.",
+            "scenes": [],
+            "completed": 0,
+            "total": 0,
+        }
 
     if manifest.get("status") in {"running", "pause_requested", "stop_requested"} and not video_worker_active(project_id):
         manifest["status"] = "paused"
@@ -783,10 +849,8 @@ async def regenerate_project_video_scene(
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="The screenplay is missing.")
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
     if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
@@ -942,10 +1006,8 @@ async def resume_project_video(
 ):
     project = get_project_or_404(project_id, db)
 
-    if not settings.comfyui_api_key:
-        raise HTTPException(status_code=503, detail="COMFYUI_API_KEY is not configured in your local .env file.")
-    if not settings.comfyui_base_url:
-        raise HTTPException(status_code=503, detail="COMFYUI_BASE_URL is not configured.")
+    if worker_count() == 0:
+        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
 
     manifest = read_video_manifest(Path(project.project_path))
     if not manifest:
