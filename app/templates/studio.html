@@ -21,6 +21,20 @@
     <button type="submit">Create project</button><p id="message" class="message"></p>
   </form>
 </section>
+<section class="panel kaggle-pool-panel" id="kaggle-worker-panel">
+  <h2>Kaggle Worker Pool · Shared by all projects</h2>
+  <p class="message">Register up to five independent Kaggle installations. Each worker stores its own URL, encrypted API key and workflow ID in the application database.</p>
+  <form id="kaggle-worker-form">
+    <div class="row">
+      <label>Worker name<input name="name" required placeholder="e.g. Kaggle T4 Worker 1"></label>
+      <label>Kaggle API URL<input name="api_url" type="url" required placeholder="https://your-worker.trycloudflare.com"></label>
+      <label>API key<input name="api_key" type="password" required autocomplete="off" placeholder="Worker-specific API key"></label>
+    </div>
+    <button type="submit">Register Kaggle Workflow</button>
+    <p id="kaggle-worker-message" class="message" role="status"></p>
+  </form>
+  <div id="kaggle-worker-list" class="kaggle-worker-list">Loading registered workers...</div>
+</section>
 <section class="panel"><h2>Projects</h2><div id="projects" class="projects">Loading projects...</div></section>
 </main>
 <script src="/static/studio.js"></script>
