@@ -13,7 +13,36 @@ import httpx
 from app.config import settings
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
-import sqlite3
+from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
+
+logger = logging.getLogger(__name__)
+
+_TASKS: dict[int, asyncio.Task] = {}
+_CONTROLS: dict[int, str] = {}
+
+IMAGE_NODE = "269"
+AUDIO_NODE = "276"
+PROMPT_NODE = "459"
+DURATION_NODE = "378"
+FPS_NODE = "379"
+VIDEO_OUTPUT_NODE = "400"
+
+import asyncio
+import json
+import logging
+import mimetypes
+import re
+import wave
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin
+
+import httpx
+
+from app.config import settings
+from app.database import SessionLocal
+from app.models import ProductionStage, StageStatus
+from app.services.kaggle_workers import reserve_worker, release_worker, update_worker_job, worker_count
 
 logger = logging.getLogger(__name__)
 
