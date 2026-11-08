@@ -352,8 +352,7 @@ async function runAction(button, projectId, endpoint, progressText) {
         await api(`/api/projects/${projectId}/${endpoint}`, {
             method: "POST"
         });
-        await initializeKaggleWorkerForm();
-loadProjects();
+        await loadProjects();
     } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
@@ -1298,4 +1297,5 @@ setInterval(async () => {
     }
 }, 3000);
 
+initializeKaggleWorkerForm();
 loadProjects();
