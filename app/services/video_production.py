@@ -545,6 +545,7 @@ async def _process_video_scene(
     project_id: int,
     project_path: Path,
     screenplay: dict,
+    manifest: dict,
     scene: dict,
     index: int,
     total: int,
@@ -584,7 +585,6 @@ async def _process_video_scene(
         duration = max(1.0, duration)
 
         record.update(status="waiting_for_worker", duration_seconds=duration, fps=fps, error=None)
-        manifest = read_manifest(project_path) or {}
         manifest["status"] = "running"
         manifest["current"] = {"index": index, "total": total, "scene_id": scene_id}
         manifest["detail"] = f"Waiting for a free Kaggle worker for {scene_id}."
@@ -647,7 +647,6 @@ async def _process_video_scene(
                     for token in ("connecterror", "connecttimeout", "readtimeout", "remoteprotocolerror")
                 )
             release_worker(worker["id"], offline=offline, error=error)
-        manifest = read_manifest(project_path) or {}
         manifest["completed"] = _completed_count(project_path, manifest)
         manifest["current"] = None
         write_manifest(project_path, manifest)
@@ -757,6 +756,7 @@ async def _run_worker(
                         project_id=project_id,
                         project_path=project_path,
                         screenplay=screenplay,
+                        manifest=manifest,
                         scene=scene,
                         index=index,
                         total=len(scenes),
