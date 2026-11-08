@@ -602,6 +602,9 @@ async def _process_video_scene(
 
         client_config = KaggleComfyClient(worker)
         record.update(status="uploading", worker_name=worker["name"])
+        active = manifest.setdefault("active_scenes", [])
+        active.append({"scene_id": scene_id, "worker_name": worker["name"], "job_id": None})
+        manifest["current"] = active[0] if active else None
         manifest["detail"] = f"Uploading inputs and queueing {scene_id} on {worker['name']}."
         write_manifest(project_path, manifest)
 
@@ -615,6 +618,9 @@ async def _process_video_scene(
         )
         update_worker_job(worker["id"], job_id)
         record.update(status="running", job_id=job_id, worker_name=worker["name"])
+        for active_item in manifest.get("active_scenes", []):
+            if active_item.get("scene_id") == scene_id:
+                active_item["job_id"] = job_id
 
         manifest["detail"] = f"Generating {scene_id} on {worker['name']} (job {job_id})."
         write_manifest(project_path, manifest)
@@ -644,8 +650,12 @@ async def _process_video_scene(
         if worker is not None:
             error = record.get("error")
             release_worker(worker["id"], offline=worker_offline, error=error)
+        manifest["active_scenes"] = [
+            item for item in manifest.get("active_scenes", [])
+            if item.get("scene_id") != scene_id
+        ]
         manifest["completed"] = _completed_count(project_path, manifest)
-        manifest["current"] = None
+        manifest["current"] = manifest["active_scenes"][0] if manifest["active_scenes"] else None
         write_manifest(project_path, manifest)
 
 
