@@ -302,10 +302,10 @@ async function renderAudioStage(workflow, project, audioStage) {
     let manifest = null;
 
     try {
-        screenplayData = await api(\`/api/projects/\${project.id}/screenplay\`);
-        manifest = await api(\`/api/projects/\${project.id}/audio\`).catch(() => null);
+        screenplayData = await api(`/api/projects/${project.id}/screenplay`);
+        manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
     } catch (error) {
-        setMessage(panel, \`Audio setup unavailable: \${error.message}\`);
+        setMessage(panel, `Audio setup unavailable: ${error.message}`);
         workflow.appendChild(panel);
         return;
     }
