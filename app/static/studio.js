@@ -350,13 +350,21 @@ async function renderSelectedProjectView() {
 }
 
 async function renderScreenplayView(panel, project, stage) {
-    const status = stage?.status || "pending";
-    const detail = document.createElement("p");
-    detail.className = "message";
-    detail.textContent = stage?.detail || "Your screenplay has not been generated yet.";
-    panel.appendChild(detail);
+    let data = null;
+    try {
+        data = await api(`/api/projects/${project.id}/screenplay`);
+    } catch (error) {
+        setMessage(panel, `Could not load the saved screenplay: ${error.message}`);
+        return;
+    }
 
-    if (!["completed", "waiting_approval"].includes(status)) {
+    const screenplay = data?.screenplay || null;
+    const status = stage?.status || "pending";
+    if (!screenplay) {
+        const detail = document.createElement("p");
+        detail.className = "message";
+        detail.textContent = stage?.detail || "This project does not have a saved screenplay yet.";
+        panel.appendChild(detail);
         const button = createButton(
             status === "running" ? "Screenplay is generating…" : "Generate screenplay",
             async btn => {
@@ -375,18 +383,9 @@ async function renderScreenplayView(panel, project, stage) {
         button.disabled = status === "running";
         button.className = "primary-button";
         panel.appendChild(button);
-        if (status === "failed") setMessage(panel, "Generation failed. You can try again.");
         return;
     }
 
-    let data;
-    try {
-        data = await api(`/api/projects/${project.id}/screenplay`);
-    } catch (error) {
-        setMessage(panel, error.message);
-        return;
-    }
-    const screenplay = data.screenplay || {};
     if (screenplay.logline) {
         const logline = document.createElement("p");
         logline.className = "screenplay-logline";
@@ -416,13 +415,15 @@ async function renderScreenplayView(panel, project, stage) {
         const summary = document.createElement("p");
         summary.textContent = scene.summary || scene.description || "";
         card.append(title, summary);
-        if (scene.dialogue?.length) {
+        const dialogueLines = scene.dialogue_and_narration || scene.dialogue || [];
+        if (dialogueLines.length) {
             const dialogue = document.createElement("p");
-            dialogue.textContent = scene.dialogue.map(line => `${line.speaker || ""}: ${line.text || ""}`).join("\n");
+            dialogue.textContent = dialogueLines.map(line => `${line.speaker || "Narrator"}: ${line.text || ""}`).join("\n");
             card.appendChild(dialogue);
         }
         panel.appendChild(card);
     });
+
     const details = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "View complete screenplay JSON";
@@ -445,7 +446,7 @@ async function renderScreenplayView(panel, project, stage) {
         });
         approve.className = "primary-button";
         panel.appendChild(approve);
-    } else {
+    } else if (status === "completed") {
         const approved = document.createElement("p");
         approved.className = "message";
         approved.textContent = "Screenplay approved. Continue with Images when ready.";
@@ -480,7 +481,8 @@ function addImageAssetCard(container, projectId, title, record) {
 }
 
 async function renderImagesView(panel, project, stages) {
-    const status = await api(`/api/projects/${project.id}/images/status`).catch(() => null);
+    const imageResponse = await api(`/api/projects/${project.id}/images/status`).catch(() => null);
+    const status = imageResponse?.status || imageResponse || null;
     const refs = status?.references || {};
     const sceneImages = status?.scenes || {};
     const refStatus = refs.status || stages.character_bible?.status || "pending";
@@ -490,7 +492,7 @@ async function renderImagesView(panel, project, stages) {
     summary.className = "message";
     const stats = status?.statistics || {};
     summary.textContent = status
-        ? `References: ${stats.references_completed || 0}/${stats.references_total || 0} · Scene images: ${stats.scenes_completed || 0}/${stats.scenes_total || 0}`
+        ? `Image status: ${status.status || "pending"} · References: ${stats.references_completed || 0}/${stats.references_total || 0} · Scene images: ${stats.scenes_completed || 0}/${stats.scenes_total || 0}`
         : "No image manifest has been created yet.";
     panel.appendChild(summary);
 
@@ -698,7 +700,12 @@ async function renderAudioStage(workflow, project, audioStage) {
         return;
     }
 
-    const screenplay = screenplayData.screenplay || {};
+    const screenplay = screenplayData.screenplay || null;
+    if (!screenplay) {
+        setMessage(panel, "Generate the screenplay first. Once it is saved, voice assignments and generated audio will appear here.");
+        workflow.appendChild(panel);
+        return;
+    }
     const characters = screenplay.characters || [];
 
     const speakers = characters.map(character => ({
