@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/studio.css?v=2">
+  <link rel="stylesheet" href="/static/studio.css?v=3">
 </head>
 <body>
   <div class="app-shell">
@@ -19,10 +19,15 @@
       </a>
       <div class="sidebar-label">WORKSPACE</div>
       <nav class="side-nav" aria-label="Main navigation">
-        <a class="nav-link active" href="#overview"><span class="nav-icon">⌂</span><span>Overview</span></a>
-        <a class="nav-link" href="#create-project"><span class="nav-icon">＋</span><span>New story</span></a>
-        <a class="nav-link" href="#projects"><span class="nav-icon">▤</span><span>My projects</span></a>
-        <a class="nav-link" href="#kaggle-worker-panel"><span class="nav-icon">◈</span><span>Render workers</span></a>
+        <button class="nav-link active" type="button" data-page-link="overview"><span class="nav-icon">⌂</span><span>Overview</span></button>
+        <button class="nav-link" type="button" data-page-link="create"><span class="nav-icon">＋</span><span>New story</span></button>
+        <div class="project-nav" id="project-nav">
+          <button class="nav-link project-nav-toggle" id="my-projects-toggle" type="button" aria-expanded="false">
+            <span class="nav-icon">▤</span><span>My Projects</span><span class="nav-chevron">⌄</span>
+          </button>
+          <div class="project-nav-list" id="project-nav-list"><p class="project-nav-empty">Loading projects…</p></div>
+        </div>
+        <button class="nav-link" type="button" data-page-link="workers"><span class="nav-icon">◈</span><span>Render workers</span></button>
       </nav>
       <div class="sidebar-note">
         <div class="sidebar-note-icon">✦</div>
@@ -33,89 +38,97 @@
     </aside>
 
     <div class="workspace">
-      <header class="topbar" id="overview">
-        <div class="breadcrumb"><span>Workspace</span><span class="crumb-separator">/</span><strong>Overview</strong></div>
+      <header class="topbar">
+        <div class="breadcrumb"><span>Workspace</span><span class="crumb-separator">/</span><strong id="breadcrumb-current">Overview</strong></div>
         <div class="topbar-right"><span class="topbar-status"><span class="status-dot"></span> Studio ready</span><div class="profile-mark" aria-label="Studio user">S</div></div>
       </header>
 
       <main class="dashboard">
-        <section class="welcome">
-          <div class="welcome-copy">
-            <div class="eyebrow"><span class="eyebrow-line"></span> YOUR CREATIVE WORKSPACE</div>
-            <h1>Bring your stories<br><span>to life.</span></h1>
-            <p>Shape your idea into a screenplay, create characters and scenes, then produce your film—all in one place.</p>
-            <a class="welcome-action" href="#create-project">＋ &nbsp; Create a story</a>
+        <section class="page-view" data-page="overview" id="overview-view">
+          <section class="welcome">
+            <div class="welcome-copy">
+              <div class="eyebrow"><span class="eyebrow-line"></span> YOUR CREATIVE WORKSPACE</div>
+              <h1>Bring your stories<br><span>to life.</span></h1>
+              <p>Shape your idea into a screenplay, create characters and scenes, then produce your film—all in one place.</p>
+              <button class="welcome-action" type="button" data-page-link="create">＋ &nbsp; Create a story</button>
+            </div>
+            <div class="welcome-art" aria-hidden="true">
+              <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div><div class="art-sun"></div>
+              <div class="art-hill hill-back"></div><div class="art-hill hill-front"></div>
+              <div class="art-film"><span></span><span></span><span></span><span></span></div>
+              <div class="art-spark spark-one">✦</div><div class="art-spark spark-two">✧</div>
+            </div>
+          </section>
+          <div class="section-heading">
+            <div><div class="eyebrow">YOUR WORKSPACE</div><h2>Everything starts with a story</h2><p class="section-subtitle">Create a project or choose one from My Projects in the sidebar.</p></div>
           </div>
-          <div class="welcome-art" aria-hidden="true">
-            <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div><div class="art-sun"></div>
-            <div class="art-hill hill-back"></div><div class="art-hill hill-front"></div>
-            <div class="art-film"><span></span><span></span><span></span><span></span></div>
-            <div class="art-spark spark-one">✦</div><div class="art-spark spark-two">✧</div>
-          </div>
+          <section class="overview-shortcuts">
+            <button class="shortcut-card" type="button" data-page-link="create"><span class="shortcut-icon">✎</span><strong>New story</strong><small>Start a screenplay from your idea</small></button>
+            <button class="shortcut-card" type="button" data-project-shortcut="first"><span class="shortcut-icon">▤</span><strong>My projects</strong><small>Continue an existing production</small></button>
+            <button class="shortcut-card" type="button" data-page-link="workers"><span class="shortcut-icon">◈</span><strong>Render workers</strong><small>Manage your Kaggle render pool</small></button>
+          </section>
         </section>
 
-        <div class="section-heading">
-          <div><div class="eyebrow">GET STARTED</div><h2>Create something wonderful</h2><p class="section-subtitle">Start with a simple idea. You can refine every stage as you go.</p></div>
-        </div>
-
-        <section class="panel create-panel" id="create-project">
-          <div class="panel-heading">
-            <div class="panel-icon create-icon">✎</div>
-            <div><h3>New story project</h3><p>Tell us what your film is about.</p></div>
-            <span class="step-tag">STEP 01</span>
-          </div>
-          <form id="project-form" class="project-form">
-            <div class="form-grid form-grid-two">
-              <label>Story title<input name="title" required placeholder="e.g. The Thirsty Crow"></label>
-              <label>Story language<input name="language" value="Hindi" required placeholder="e.g. Hindi, English, Tamil"></label>
+        <section class="page-view" data-page="create" id="create-view" hidden>
+          <div class="section-heading"><div><div class="eyebrow">NEW PROJECT</div><h2>Create something wonderful</h2><p class="section-subtitle">Tell us what your film is about. You can refine every stage later.</p></div></div>
+          <section class="panel create-panel" id="create-project">
+            <div class="panel-heading">
+              <div class="panel-icon create-icon">✎</div>
+              <div><h3>New story project</h3><p>Start with a story idea.</p></div>
+              <span class="step-tag">STEP 01</span>
             </div>
-            <label>Story idea
-              <textarea name="story_idea" required minlength="10" rows="4" placeholder="Describe your story, its characters, and what happens..."></textarea>
-              <span class="field-hint">A few sentences are enough to get started. You can develop the details later.</span>
-            </label>
-            <div class="form-grid form-grid-three">
-              <label>Target duration<span class="input-with-suffix"><input name="target_duration_minutes" type="number" min="1" max="180" value="5"><span>minutes</span></span></label>
-              <label>Visual style<input name="visual_style" value="Photorealistic live-action cinematic" placeholder="Choose a visual style"></label>
-              <label>Aspect ratio<select name="aspect_ratio"><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
-            </div>
-            <div class="form-footer">
-              <p class="form-footnote"><span>✦</span> You can change production details later.</p>
-              <div class="form-submit-area"><p id="message" class="message" role="status"></p><button type="submit" class="primary-button"><span>Create project</span><span class="button-arrow">→</span></button></div>
-            </div>
-          </form>
+            <form id="project-form" class="project-form">
+              <div class="form-grid form-grid-two">
+                <label>Story title<input name="title" required placeholder="e.g. The Thirsty Crow"></label>
+                <label>Story language<input name="language" value="Hindi" required placeholder="e.g. Hindi, English, Tamil"></label>
+              </div>
+              <label>Story idea
+                <textarea name="story_idea" required minlength="10" rows="4" placeholder="Describe your story, its characters, and what happens..."></textarea>
+                <span class="field-hint">A few sentences are enough to get started. You can develop the details later.</span>
+              </label>
+              <div class="form-grid form-grid-three">
+                <label>Target duration<span class="input-with-suffix"><input name="target_duration_minutes" type="number" min="1" max="180" value="5"><span>minutes</span></span></label>
+                <label>Visual style<input name="visual_style" value="Photorealistic live-action cinematic" placeholder="Choose a visual style"></label>
+                <label>Aspect ratio<select name="aspect_ratio"><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
+              </div>
+              <div class="form-footer">
+                <p class="form-footnote"><span>✦</span> You can change production details later.</p>
+                <div class="form-submit-area"><p id="message" class="message" role="status"></p><button type="submit" class="primary-button"><span>Create project</span><span class="button-arrow">→</span></button></div>
+              </div>
+            </form>
+          </section>
         </section>
 
-        <section class="panel projects-panel">
-          <div class="panel-heading">
-            <div class="panel-icon projects-icon">▤</div>
-            <div><h3>Your projects</h3><p>Continue where you left off.</p></div>
-            <span class="live-tag"><span class="status-dot"></span> LIVE</span>
-          </div>
-          <div id="projects" class="projects">Loading projects...</div>
-        </section>
-
-        <section class="panel kaggle-pool-panel" id="kaggle-worker-panel">
-          <div class="panel-heading">
-            <div class="panel-icon workers-icon">◈</div>
-            <div><h3>Render infrastructure</h3><p>Manage the Kaggle machines that render your video scenes.</p></div>
-            <span class="step-tag">UP TO 5 WORKERS</span>
-          </div>
-          <div class="worker-intro"><span class="worker-intro-icon">ⓘ</span><p>Each worker has its own gateway URL and API key. Credentials are stored encrypted in the application database.</p></div>
-          <form id="kaggle-worker-form" class="worker-form">
-            <div class="form-grid form-grid-three">
-              <label>Worker name<input name="name" required placeholder="e.g. Kaggle T4 Worker 1"></label>
-              <label>Gateway URL<input name="api_url" type="url" required placeholder="https://your-worker.trycloudflare.com"></label>
-              <label>Worker API key<input name="api_key" type="password" required autocomplete="off" placeholder="Enter worker API key"></label>
+        <section class="page-view" data-page="workers" id="workers-view" hidden>
+          <div class="section-heading"><div><div class="eyebrow">RENDER INFRASTRUCTURE</div><h2>Render workers</h2><p class="section-subtitle">Manage the Kaggle machines that render your video scenes.</p></div></div>
+          <section class="panel kaggle-pool-panel" id="kaggle-worker-panel">
+            <div class="panel-heading">
+              <div class="panel-icon workers-icon">◈</div>
+              <div><h3>Global Kaggle worker pool</h3><p>Register and monitor up to five independent workers.</p></div>
+              <span class="step-tag">UP TO 5 WORKERS</span>
             </div>
-            <div class="worker-form-footer"><p id="kaggle-worker-message" class="message" role="status"></p><button type="submit" class="secondary-button">＋ &nbsp; Register worker</button></div>
-          </form>
-          <div id="kaggle-worker-list" class="kaggle-worker-list">Loading registered workers...</div>
+            <div class="worker-intro"><span class="worker-intro-icon">ⓘ</span><p>Each worker has its own gateway URL and API key. Credentials are stored encrypted in the application database.</p></div>
+            <form id="kaggle-worker-form" class="worker-form">
+              <div class="form-grid form-grid-three">
+                <label>Worker name<input name="name" required placeholder="e.g. Kaggle T4 Worker 1"></label>
+                <label>Gateway URL<input name="api_url" type="url" required placeholder="https://your-worker.trycloudflare.com"></label>
+                <label>Worker API key<input name="api_key" type="password" required autocomplete="off" placeholder="Enter worker API key"></label>
+              </div>
+              <div class="worker-form-footer"><p id="kaggle-worker-message" class="message" role="status"></p><button type="submit" class="secondary-button">＋ &nbsp; Register worker</button></div>
+            </form>
+            <div id="kaggle-worker-list" class="kaggle-worker-list">Loading registered workers...</div>
+          </section>
         </section>
 
+        <section class="page-view project-detail-view" data-page="project" id="project-detail-view" hidden>
+          <div id="project-detail-content"></div>
+        </section>
+
+        <div id="projects" hidden></div>
         <footer class="page-footer"><span>Hindi Story Video Studio</span><span>Made for stories worth telling.</span></footer>
       </main>
     </div>
   </div>
-  <script src="/static/studio.js?v=2"></script>
+  <script src="/static/studio.js?v=3"></script>
 </body>
 </html>
