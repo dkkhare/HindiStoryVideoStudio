@@ -265,3 +265,12 @@ async def health_monitor() -> None:
         except Exception:
             logger.exception("Kaggle worker health monitor failed")
         await asyncio.sleep(HEALTH_INTERVAL_SECONDS)
+
+
+
+def worker_count() -> int:
+    db = SessionLocal()
+    try:
+        return db.query(KaggleWorker).count()
+    finally:
+        db.close()
