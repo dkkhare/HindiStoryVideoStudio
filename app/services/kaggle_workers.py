@@ -117,6 +117,8 @@ def serialize_worker(worker: KaggleWorker) -> dict:
         "status": worker.status,
         "consecutive_health_failures": worker.consecutive_health_failures,
         "current_job_id": worker.current_job_id,
+        "current_project_id": worker.current_project_id,
+        "current_scene_id": worker.current_scene_id,
         "last_seen_at": worker.last_seen_at.isoformat() if worker.last_seen_at else None,
         "last_error": worker.last_error,
     }
@@ -159,11 +161,12 @@ def reserve_worker(project_id: int, scene_id: str) -> dict | None:
         if reserved_id is None:
             db.rollback()
             return None
-        db.commit()
         worker = db.get(KaggleWorker, reserved_id)
+        api_key = decrypt_api_key(worker.encrypted_api_key)
+        db.commit()
         return {
             **serialize_worker(worker),
-            "api_key": decrypt_api_key(worker.encrypted_api_key),
+            "api_key": api_key,
         }
     finally:
         db.close()
