@@ -22,6 +22,7 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
+from app.services.kaggle_workers import register_worker, list_workers, worker_count
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
@@ -42,6 +43,43 @@ from app.services.audio_production import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+@router.get("/kaggle/workers")
+def get_kaggle_workers():
+    return {"workers": list_workers(), "limit": 5}
+
+
+@router.post("/kaggle/workers/register")
+async def register_kaggle_worker(request: Request):
+    try:
+        payload = await request.json()
+        worker = await register_worker(
+            name=str(payload.get("name") or ""),
+            api_url=str(payload.get("api_url") or ""),
+            api_key=str(payload.get("api_key") or ""),
+        )
+        return {"ok": True, "worker": worker}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Kaggle registration request failed: {exc}") from exc
+    except Exception as exc:
+        logger.exception("Kaggle worker registration failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/kaggle/workers/{worker_id}")
+def delete_kaggle_worker(worker_id: int, db: Session = Depends(get_db)):
+    from app.models import KaggleWorker
+    worker = db.get(KaggleWorker, worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Kaggle worker not found.")
+    if worker.status == "BUSY":
+        raise HTTPException(status_code=409, detail="Cannot remove a worker while it is processing a scene.")
+    db.delete(worker)
+    db.commit()
+    return {"ok": True}
+
 
 STAGES = [
     "screenplay",
