@@ -7,3 +7,19 @@
 
 /* Kaggle ComfyUI / LTX scene-video production */
 .video-stage{width:100%;display:grid;gap:12px;padding:14px;margin-top:12px;border:1px solid #3b5272;border-radius:10px;background:#142033}.video-stage h4{margin:0;font-size:16px}.video-scene{padding:12px 0;border-top:1px solid #304159}.video-scene p{font-weight:600;margin:0 0 8px}.video-stage video{display:block;border-radius:8px;background:#080c12}
+
+
+/* Shared database-backed Kaggle worker pool */
+.kaggle-pool-panel{display:grid;gap:14px}
+.kaggle-pool-panel h2{margin-bottom:0}
+.kaggle-worker-list{display:grid;gap:10px}
+.kaggle-worker-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;align-items:center;padding:12px;border:1px solid #304159;border-radius:9px;background:#101a29}
+.kaggle-worker-card>div{display:grid;gap:4px;min-width:0}
+.kaggle-worker-card small{display:block;color:#9eacc0;overflow-wrap:anywhere;font-size:12px}
+.worker-status{font-size:11px;font-weight:700;letter-spacing:.05em;padding:6px 9px;border-radius:20px;background:#35445a;color:#e9edf5}
+.worker-free{background:#245d45;color:#d7ffeb}
+.worker-busy{background:#805b22;color:#fff0c9}
+.worker-offline{background:#713838;color:#ffe1e1}
+.worker-error{grid-column:1/-1;color:#ffb3b3!important}
+.kaggle-worker-card button{grid-column:2;grid-row:2;padding:7px 12px;background:#53647c}
+@media(max-width:650px){.kaggle-worker-card{grid-template-columns:1fr}.kaggle-worker-card button{grid-column:1;grid-row:auto;justify-self:start}}
