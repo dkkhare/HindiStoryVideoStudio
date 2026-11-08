@@ -38,5 +38,6 @@ class ScreenplayResponse(BaseModel):
 
 
 class AudioGenerateRequest(BaseModel):
+    provider: str = Field(default="voicebox", pattern="^(gemini|voicebox|voicestudio)$")
     voice_assignments: dict[str, str]
     engine: str = Field(default="chatterbox", pattern="^(qwen|qwen_custom_voice|luxtts|chatterbox|chatterbox_turbo|tada|kokoro)$")

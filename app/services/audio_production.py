@@ -7,7 +7,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
-from app.services.tts import VoiceboxTTSProvider
+from app.services.tts import get_tts_provider
 
 logger = logging.getLogger(__name__)
 _TASKS: dict[int, asyncio.Task] = {}
@@ -152,7 +152,8 @@ async def _run_worker(
     write_manifest(project_path, manifest)
     _set_stage(project_id, StageStatus.running, "Audio generation started/resumed.")
 
-    provider = VoiceboxTTSProvider()
+    provider_name = str(manifest.get("provider") or "voicebox").lower()
+    provider = get_tts_provider(provider_name)
     segments = manifest.get("segments") or []
     assignments = manifest.get("voice_assignments") or []
     assignment_map = {item["speaker_id"]: item["profile_id"] for item in assignments}
@@ -209,7 +210,7 @@ async def _run_worker(
                 temporary.write_bytes(audio_bytes)
                 if not _valid_wav(temporary):
                     temporary.unlink(missing_ok=True)
-                    raise RuntimeError(f"Voicebox returned invalid WAV audio for {item['segment_id']}")
+                    raise RuntimeError(f"{provider_name} returned invalid WAV audio for {item['segment_id']}")
                 temporary.replace(path)
                 item["status"] = "completed"
                 item["profile_id"] = profile_id

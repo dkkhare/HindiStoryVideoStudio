@@ -21,7 +21,7 @@ from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGene
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
-from app.services.tts import VoiceboxTTSProvider
+from app.services.tts import VoiceboxTTSProvider, list_tts_voices
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
@@ -491,7 +491,7 @@ def get_project_asset(
 
 @router.get("/voicebox/profiles")
 async def list_voicebox_profiles():
-    """Return available local Voicebox voice profiles for the audio-stage selector."""
+    """Backward-compatible endpoint for local Voicebox profiles."""
     try:
         return await VoiceboxTTSProvider().list_profiles()
     except Exception as exc:
@@ -502,17 +502,34 @@ async def list_voicebox_profiles():
         ) from exc
 
 
+@router.get("/tts/voices")
+async def list_tts_provider_voices(provider: str = "voicebox"):
+    """Return the voice choices available for the selected TTS provider."""
+    try:
+        return await list_tts_voices(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Could not load %s TTS voices", provider)
+        if provider == "gemini":
+            detail = f"Gemini TTS is unavailable: {exc}"
+        elif provider in {"voicestudio", "voice_studio"}:
+            detail = f"Could not connect to Voice Studio at {settings.voicestudio_base_url}: {exc}"
+        else:
+            detail = f"Could not connect to Voicebox at {settings.voicebox_base_url}: {exc}"
+        raise HTTPException(status_code=503, detail=detail) from exc
+
+
 @router.post("/projects/{project_id}/audio/generate")
 async def generate_project_audio(
     project_id: int,
     payload: AudioGenerateRequest,
     db: Session = Depends(get_db),
 ):
-    """Prepare per-speaker voice assignments and start/resume checkpointed audio."""
+    """Prepare provider-specific per-speaker voice assignments and start/resume audio."""
     project = get_project_or_404(project_id, db)
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate the screenplay before generating audio.")
-
     stage = get_stage(project, "audio")
     if not stage:
         raise HTTPException(status_code=500, detail="Audio production stage is missing.")
@@ -520,18 +537,14 @@ async def generate_project_audio(
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
 
     screenplay = json.loads(project.screenplay_json)
-    scenes = screenplay.get("scenes") or []
-    if not scenes:
+    if not (screenplay.get("scenes") or []):
         raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
 
-    voicebox = VoiceboxTTSProvider()
+    provider_name = payload.provider.lower()
     try:
-        profiles = await voicebox.list_profiles()
+        voices = await list_tts_voices(provider_name)
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}",
-        ) from exc
+        raise HTTPException(status_code=503, detail=f"Could not load voices for {provider_name}: {exc}") from exc
 
     speakers = required_speakers(screenplay)
     required_ids = [item["id"] for item in speakers]
@@ -539,16 +552,16 @@ async def generate_project_audio(
     if missing:
         raise HTTPException(
             status_code=400,
-            detail="Select a voice profile for every character and the narrator: " + ", ".join(missing),
+            detail="Select a voice for every character and the narrator: " + ", ".join(missing),
         )
 
-    profile_map = {str(item.get("id")): item for item in profiles}
-    invalid_profiles = sorted({
-        profile_id for profile_id in payload.voice_assignments.values()
-        if profile_id not in profile_map
+    voice_map = {str(item.get("id")): item for item in voices}
+    invalid_voices = sorted({
+        voice_id for voice_id in payload.voice_assignments.values()
+        if voice_id not in voice_map
     })
-    if invalid_profiles:
-        raise HTTPException(status_code=400, detail="One or more selected Voicebox profiles are unavailable.")
+    if invalid_voices:
+        raise HTTPException(status_code=400, detail="One or more selected voices are unavailable for this provider.")
 
     project_path = Path(project.project_path)
     existing = read_manifest(project_path)
@@ -568,14 +581,15 @@ async def generate_project_audio(
 
     if same_queue:
         manifest = existing
+        provider_changed = str(manifest.get("provider") or "voicebox").lower() != provider_name
         old_assignment_map = {
             item.get("speaker_id"): item.get("profile_id")
             for item in (manifest.get("voice_assignments") or [])
         }
         for item in manifest["segments"]:
-            old_profile = old_assignment_map.get(item.get("speaker"))
-            new_profile = payload.voice_assignments.get(item.get("speaker"))
-            if old_profile != new_profile:
+            old_voice = old_assignment_map.get(item.get("speaker"))
+            new_voice = payload.voice_assignments.get(item.get("speaker"))
+            if provider_changed or old_voice != new_voice:
                 old_audio = project_path / item.get("audio", "")
                 old_audio.unlink(missing_ok=True)
                 item["status"] = "pending"
@@ -583,20 +597,23 @@ async def generate_project_audio(
                 item.pop("error", None)
     else:
         manifest = {
-            "provider": "voicebox",
+            "provider": provider_name,
             "segments": new_segments,
             "scenes": [],
             "completed": 0,
             "next_segment_index": 0,
         }
 
+    manifest["provider"] = provider_name
     manifest["voice_assignments"] = [
         {
             "speaker_id": speaker["id"],
             "speaker_name": speaker["name"],
             "kind": speaker["kind"],
             "profile_id": payload.voice_assignments[speaker["id"]],
-            "profile_name": profile_map[payload.voice_assignments[speaker["id"]]].get("name", payload.voice_assignments[speaker["id"]]),
+            "profile_name": voice_map[payload.voice_assignments[speaker["id"]]].get(
+                "name", payload.voice_assignments[speaker["id"]]
+            ),
         }
         for speaker in speakers
     ]
@@ -606,7 +623,7 @@ async def generate_project_audio(
     manifest["completed"] = sum(x.get("status") == "completed" for x in manifest["segments"])
     manifest["error"] = None
     manifest["status"] = "running"
-    manifest["detail"] = "Audio generation queued."
+    manifest["detail"] = f"{provider_name.title()} audio generation queued."
     write_manifest(project_path, manifest)
 
     if not start_audio_worker(project_id, project_path, project.language, payload.engine):
@@ -614,6 +631,7 @@ async def generate_project_audio(
     return {
         "ok": True,
         "status": "running",
+        "provider": provider_name,
         "message": "Audio generation started. It will continue in the background.",
         "total": manifest["total"],
         "completed": manifest["completed"],

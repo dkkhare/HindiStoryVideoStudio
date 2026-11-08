@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     voicebox_timeout_seconds: int = 600
     voicebox_generation_timeout_seconds: int = 600
 
+    # Local OpenAI-compatible Voice Studio TTS server
+    voicestudio_base_url: str = "http://127.0.0.1:3900/v1"
+    voicestudio_api_key: str = "local"
+    voicestudio_model: str = "tts-1"
+    voicestudio_voices: str = "alloy,echo,fable,onyx,nova,shimmer"
+    voicestudio_timeout_seconds: int = 600
+
     default_video_width: int = 1280
     default_video_height: int = 720
     default_fps: int = 24

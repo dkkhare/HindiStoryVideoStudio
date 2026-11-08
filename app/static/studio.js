@@ -295,121 +295,141 @@ async function renderAudioStage(workflow, project, audioStage) {
     panel.dataset.projectId = project.id;
 
     const heading = document.createElement("h4");
-    heading.textContent = "Audio Production · Voice Assignment";
+    heading.textContent = "Audio Production · TTS Provider & Voice Assignment";
     panel.appendChild(heading);
 
     let screenplayData;
-    let profiles;
     let manifest = null;
 
     try {
-        [screenplayData, profiles] = await Promise.all([
-            api(`/api/projects/${project.id}/screenplay`),
-            api("/api/voicebox/profiles")
-        ]);
-
-        manifest = await api(
-            `/api/projects/${project.id}/audio`
-        ).catch(() => null);
-
+        screenplayData = await api(\`/api/projects/\${project.id}/screenplay\`);
+        manifest = await api(\`/api/projects/\${project.id}/audio\`).catch(() => null);
     } catch (error) {
-        setMessage(panel, `Audio setup unavailable: ${error.message}`);
+        setMessage(panel, \`Audio setup unavailable: \${error.message}\`);
         workflow.appendChild(panel);
         return;
     }
 
     const screenplay = screenplayData.screenplay || {};
     const characters = screenplay.characters || [];
-
     const speakers = characters.map(character => ({
         id: character.character_id,
         name: character.name || character.character_id,
         kind: "character"
     })).filter(item => item.id);
-
     speakers.push({
         id: "NARRATOR",
         name: "Narrator / Voice-over",
         kind: "narrator"
     });
 
-    const hindiProfiles = profiles.filter(profile =>
-        String(profile.language || "").toLowerCase() === "hi" ||
-        String(profile.language || "").toLowerCase() === "hindi"
-    );
-
-    const available = hindiProfiles.length ? hindiProfiles : profiles;
-
-    if (!available.length) {
-        setMessage(panel, "Voicebox returned no available voice profiles.");
-        workflow.appendChild(panel);
-        return;
-    }
-
     const savedAssignments = Object.fromEntries(
-        (manifest?.voice_assignments || []).map(item => [
-            item.speaker_id,
-            item.profile_id
-        ])
+        (manifest?.voice_assignments || []).map(item => [item.speaker_id, item.profile_id])
     );
-
+    const savedProvider = String(manifest?.provider || "voicebox").toLowerCase();
     const selectors = {};
+
+    const providerLabel = document.createElement("label");
+    providerLabel.className = "voice-assignment";
+    const providerTitle = document.createElement("span");
+    providerTitle.textContent = "Audio generation provider";
+    const providerSelect = document.createElement("select");
+    providerSelect.innerHTML = [
+        ["gemini", "Gemini API"],
+        ["voicebox", "Voicebox"],
+        ["voicestudio", "Voice Studio"]
+    ].map(([value, label]) => "<option value=\"" + value + "\">" + label + "</option>").join("");
+    providerSelect.value = ["gemini", "voicebox", "voicestudio"].includes(savedProvider)
+        ? savedProvider : "voicebox";
+    providerLabel.append(providerTitle, providerSelect);
+    panel.appendChild(providerLabel);
+
     const assignmentSection = document.createElement("div");
     assignmentSection.className = "voice-assignment-list";
-
     const assignmentHeading = document.createElement("p");
     assignmentHeading.textContent =
-        "Choose a separate voice profile for every character and for narration:";
-
+        "Choose a separate voice for every character and for narration:";
     assignmentSection.appendChild(assignmentHeading);
 
     for (const speaker of speakers) {
         const label = document.createElement("label");
         label.className = "voice-assignment";
-
         const title = document.createElement("span");
         title.textContent = speaker.kind === "narrator"
             ? speaker.name
-            : `${speaker.name} (${speaker.id})`;
-
+            : speaker.name + " (" + speaker.id + ")";
         const select = document.createElement("select");
         select.dataset.speakerId = speaker.id;
-
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Select voice profile…";
-        select.appendChild(placeholder);
-
-        for (const profile of available) {
-            const option = document.createElement("option");
-            option.value = profile.id;
-
-            option.textContent =
-                `${profile.name} · ${profile.language || "language not specified"}` +
-                `${profile.default_engine ? " · " + profile.default_engine : ""}`;
-
-            if (
-                String(profile.id) ===
-                String(savedAssignments[speaker.id] || "")
-            ) {
-                option.selected = true;
-            } else if (
-                !savedAssignments[speaker.id] &&
-                speaker.kind === "narrator" &&
-                String(profile.name).toLowerCase() === "niya"
-            ) {
-                option.selected = true;
-            }
-
-            select.appendChild(option);
-        }
-
         selectors[speaker.id] = select;
         label.append(title, select);
         assignmentSection.appendChild(label);
     }
-
     panel.appendChild(assignmentSection);
+
+    let availableVoices = [];
+    async function loadProviderVoices(provider, preserveSaved) {
+        assignmentHeading.textContent = "Loading voices…";
+        const voices = await api("/api/tts/voices?provider=" + encodeURIComponent(provider));
+        const hindiVoices = voices.filter(voice =>
+            ["hi", "hindi"].includes(String(voice.language || "").toLowerCase())
+        );
+        availableVoices = provider === "voicebox" && hindiVoices.length
+            ? hindiVoices : voices;
+        if (!availableVoices.length) {
+            throw new Error("No voices are configured for " + provider + ".");
+        }
+        assignmentHeading.textContent =
+            "Choose a " + (provider === "voicebox" ? "Voicebox profile" : "voice") +
+            " for every character and narration:";
+        for (const speaker of speakers) {
+            const select = selectors[speaker.id];
+            const previous = preserveSaved ? String(savedAssignments[speaker.id] || "") : "";
+            select.replaceChildren();
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Select voice…";
+            select.appendChild(placeholder);
+            for (const voice of availableVoices) {
+                const option = document.createElement("option");
+                option.value = voice.id;
+                option.textContent =
+                    String(voice.name || voice.id) +
+                    (voice.language ? " · " + voice.language : "") +
+                    (voice.default_engine ? " · " + voice.default_engine : "");
+                option.selected = previous !== "" && String(voice.id) === previous;
+                select.appendChild(option);
+            }
+            if (!previous && preserveSaved && provider === "voicebox" &&
+                speaker.kind === "narrator") {
+                const niya = availableVoices.find(voice =>
+                    String(voice.name || "").toLowerCase() === "niya"
+                );
+                if (niya) select.value = String(niya.id);
+            }
+        }
+    }
+
+    try {
+        await loadProviderVoices(providerSelect.value, providerSelect.value === savedProvider);
+    } catch (error) {
+        setMessage(panel, "Voice setup unavailable: " + error.message);
+        workflow.appendChild(panel);
+        return;
+    }
+
+    providerSelect.addEventListener("change", async () => {
+        providerSelect.disabled = true;
+        try {
+            await loadProviderVoices(providerSelect.value, false);
+            setMessage(panel, "Using " +
+                providerSelect.options[providerSelect.selectedIndex].text +
+                ". Existing audio will be regenerated with this provider.");
+        } catch (error) {
+            setMessage(panel, error.message);
+        } finally {
+            providerSelect.disabled = false;
+        }
+    });
 
     const status = manifest?.status || audioStage?.status || "pending";
     panel.dataset.audioStatus = status;
@@ -542,6 +562,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     };
 
     if (isActive(status)) {
+        providerSelect.disabled = true;
         assignmentSection.querySelectorAll("select").forEach(
             select => select.disabled = true
         );
@@ -572,7 +593,7 @@ async function renderAudioStage(workflow, project, audioStage) {
                     if (!select.value) {
                         setMessage(
                             panel,
-                            `Please select a voice profile for ${speakerId}.`
+                            `Please select a voice for ${speakerId}.`
                         );
                         select.focus();
                         return;
@@ -591,6 +612,7 @@ async function renderAudioStage(workflow, project, audioStage) {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
+                                provider: providerSelect.value,
                                 voice_assignments: voiceAssignments,
                                 engine: "chatterbox"
                             })
