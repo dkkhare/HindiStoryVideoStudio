@@ -1,7 +1,7 @@
 # Hindi Story Video Studio
 
 A modular FastAPI application scaffold for producing Hindi story videos:
-Gemini screenplay planning, character/prop continuity, Gemini image generation,
+Gemini screenplay planning, character/prop continuity, ComfyUI scene-image generation,
 Gemini TTS or F5-TTS audio, ComfyUI/LTX-2.5 video generation, and FFmpeg post-production.
 
 ## Quick start (Windows)
