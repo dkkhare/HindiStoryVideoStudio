@@ -1,0 +1,162 @@
+{
+  "1": {
+    "inputs": {
+      "preset": "PLUS (high strength)",
+      "model": ["2", 0]
+    },
+    "class_type": "IPAdapterUnifiedLoader",
+    "_meta": {"title": "IPADAPTER MODEL LOADER"}
+  },
+  "2": {
+    "inputs": {"ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"},
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {"title": "SD 1.5 CHECKPOINT"}
+  },
+  "3": {
+    "inputs": {
+      "seed": 551637933301069,
+      "steps": 20,
+      "cfg": 6,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": ["29", 0],
+      "positive": ["9", 0],
+      "negative": ["10", 0],
+      "latent_image": ["11", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": {"title": "KSampler"}
+  },
+  "9": {
+    "inputs": {
+      "text": "A cinematic realistic scene. Describe which characters appear, what they do, how they interact, and the setting. Only characters and location explicitly requested in this prompt should influence the composition.",
+      "clip": ["2", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "SCENE PROMPT - EDIT THIS"}
+  },
+  "10": {
+    "inputs": {
+      "text": "blurry, low quality, distorted anatomy, deformed body, extra limbs, duplicate characters, merged characters, missing characters, wrong identity, text, watermark",
+      "clip": ["2", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "NEGATIVE PROMPT"}
+  },
+  "11": {
+    "inputs": {"width": 512, "height": 512, "batch_size": 1},
+    "class_type": "EmptyLatentImage",
+    "_meta": {"title": "Empty Latent Image"}
+  },
+  "12": {
+    "inputs": {"samples": ["3", 0], "vae": ["2", 2]},
+    "class_type": "VAEDecode",
+    "_meta": {"title": "VAE Decode"}
+  },
+  "13": {
+    "inputs": {"filename_prefix": "ComfyUI", "images": ["12", 0]},
+    "class_type": "SaveImage",
+    "_meta": {"title": "Save Image"}
+  },
+  "20": {
+    "inputs": {"image": "CHAR_001.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "CHARACTER 1 - OPTIONAL"}
+  },
+  "21": {
+    "inputs": {
+      "weight": 0.55,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "V only",
+      "model": ["1", 0],
+      "ipadapter": ["1", 1],
+      "image": ["20", 0]
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": {"title": "CHARACTER 1 - OPTIONAL - AUTO CONTROLLER BYPASSES WHEN UNUSED"}
+  },
+  "22": {
+    "inputs": {"image": "CHAR_002.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "CHARACTER 2 - OPTIONAL"}
+  },
+  "23": {
+    "inputs": {
+      "weight": 0.55,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "V only",
+      "model": ["21", 0],
+      "ipadapter": ["1", 1],
+      "image": ["22", 0]
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": {"title": "CHARACTER 2 - OPTIONAL - AUTO CONTROLLER BYPASSES WHEN UNUSED"}
+  },
+  "24": {
+    "inputs": {"image": "CHAR_003.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "CHARACTER 3 - OPTIONAL"}
+  },
+  "25": {
+    "inputs": {
+      "weight": 0.55,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "V only",
+      "model": ["23", 0],
+      "ipadapter": ["1", 1],
+      "image": ["24", 0]
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": {"title": "CHARACTER 3 - OPTIONAL - AUTO CONTROLLER BYPASSES WHEN UNUSED"}
+  },
+  "26": {
+    "inputs": {"image": "CHAR_004.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "CHARACTER 4 - OPTIONAL"}
+  },
+  "27": {
+    "inputs": {
+      "weight": 0.55,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "V only",
+      "model": ["25", 0],
+      "ipadapter": ["1", 1],
+      "image": ["26", 0]
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": {"title": "CHARACTER 4 - OPTIONAL - AUTO CONTROLLER BYPASSES WHEN UNUSED"}
+  },
+  "28": {
+    "inputs": {"image": "LOCATION.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "LOCATION / SCENE - OPTIONAL"}
+  },
+  "29": {
+    "inputs": {
+      "weight": 0.35,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "V only",
+      "model": ["27", 0],
+      "ipadapter": ["1", 1],
+      "image": ["28", 0]
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": {"title": "LOCATION / SCENE - OPTIONAL - AUTO CONTROLLER BYPASSES WHEN UNUSED"}
+  }
+}
