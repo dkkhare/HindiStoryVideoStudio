@@ -158,14 +158,23 @@ class ComfyUISceneImageGenerator:
                 f"but this scene selected {len(uploaded_references)} references."
             )
 
-        for index, (adapter_id, consumer_id) in enumerate(chain):
-            adapter = workflow[adapter_id]
-            image_link = self._link(adapter.get("inputs", {}).get("image"))
-            enabled_image = uploaded_references[index] if index < len(uploaded_references) else None
+        disabled_adapters = set()
 
+        # First assign reference images to their exact workflow slots. None means
+        # that a slot is intentionally unused; slot positions must not shift.
+        for index, (adapter_id, _consumer_id) in enumerate(chain):
+            adapter = workflow[adapter_id]
+            enabled_image = (
+                uploaded_references[index]
+                if index < len(uploaded_references)
+                else None
+            )
             if enabled_image:
+                image_link = self._link(adapter.get("inputs", {}).get("image"))
                 if not image_link:
-                    raise ValueError(f"IPAdapter node {adapter_id} has no image input connection")
+                    raise ValueError(
+                        f"IPAdapter node {adapter_id} has no image input connection"
+                    )
                 loader_id, _ = image_link
                 loader = workflow.get(loader_id)
                 if not loader or loader.get("class_type") != "LoadImage":
@@ -174,12 +183,27 @@ class ComfyUISceneImageGenerator:
                     )
                 loader.setdefault("inputs", {})["image"] = enabled_image
             else:
-                # Bypass an unused adapter by connecting its consumer to the
-                # adapter's original model input. Its LoadImage is then unreachable.
-                original_model = adapter.get("inputs", {}).get("model")
-                if not self._link(original_model):
-                    raise ValueError(f"Cannot bypass IPAdapter node {adapter_id}: model input is missing")
-                workflow[consumer_id].setdefault("inputs", {})["model"] = original_model
+                disabled_adapters.add(adapter_id)
+
+        # Resolve through any number of disabled upstream adapters. Without this
+        # flattening, bypassing a chain root-to-sampler can leave earlier adapters
+        # reachable and accidentally execute them with placeholder images.
+        def resolve_model_link(model_link: list) -> list:
+            link = self._link(model_link)
+            if not link:
+                raise ValueError("Cannot bypass IPAdapter: model input is missing")
+            source_id, output_index = link
+            if source_id in disabled_adapters:
+                source = workflow[source_id]
+                return resolve_model_link(source.get("inputs", {}).get("model"))
+            return [source_id, output_index]
+
+        for adapter_id, consumer_id in chain:
+            if adapter_id in disabled_adapters:
+                original_model = workflow[adapter_id].get("inputs", {}).get("model")
+                workflow[consumer_id].setdefault("inputs", {})["model"] = (
+                    resolve_model_link(original_model)
+                )
 
         sampler.setdefault("inputs", {})["seed"] = random.randint(0, 2**53 - 1)
 
@@ -256,7 +280,12 @@ class ComfyUISceneImageGenerator:
         async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
             uploaded = []
             for image_path in reference_images:
-                uploaded.append(await self._upload_image(client, Path(image_path)))
+                if image_path is None:
+                    uploaded.append(None)
+                else:
+                    uploaded.append(
+                        await self._upload_image(client, Path(image_path))
+                    )
 
             workflow = self._prepare_workflow(
                 workflow, prompt, negative_prompt, uploaded, scene_id, aspect_ratio
@@ -281,5 +310,5 @@ class ComfyUISceneImageGenerator:
         return {
             "model": "ComfyUI",
             "prompt_id": prompt_id,
-            "reference_count": len(reference_images),
+            "reference_count": sum(1 for image_path in reference_images if image_path is not None),
         }
