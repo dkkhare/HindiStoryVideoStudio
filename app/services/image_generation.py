@@ -1057,27 +1057,50 @@ SCENE DESCRIPTION:
                 prop_ids = mapping.get("prop_ids", [])
                 location_ids = mapping.get("location_ids", [])
 
-                reference_paths = []
-
-                # Four character slots and one optional location slot are
-                # populated only from this scene's screenplay/asset mapping.
+                # Keep four character positions stable: the ComfyUI workflow has
+                # character slots 1-4 and a dedicated location slot 5.
+                character_reference_slots = []
                 for character_id in character_ids[:4]:
                     record_ref = references.get("characters", {}).get(character_id)
+                    candidate = None
                     if record_ref and record_ref.get("status") == "completed":
                         candidate = project_path / record_ref.get("path", "")
-                        if self.valid_image(candidate):
-                            reference_paths.append(candidate)
-                        else:
-                            logger.warning("Skipping unavailable character reference %s for %s", character_id, scene_id)
+                        if not self.valid_image(candidate):
+                            logger.warning(
+                                "Skipping unavailable character reference %s for %s",
+                                character_id,
+                                scene_id,
+                            )
+                            candidate = None
+                    character_reference_slots.append(candidate)
 
+                character_reference_slots.extend(
+                    [None] * (4 - len(character_reference_slots))
+                )
+
+                location_reference_path = None
                 for location_id in location_ids[:1]:
                     record_ref = references.get("locations", {}).get(location_id)
                     if record_ref and record_ref.get("status") == "completed":
                         candidate = project_path / record_ref.get("path", "")
                         if self.valid_image(candidate):
-                            reference_paths.append(candidate)
+                            location_reference_path = candidate
                         else:
-                            logger.warning("Skipping unavailable location reference %s for %s", location_id, scene_id)
+                            logger.warning(
+                                "Skipping unavailable location reference %s for %s",
+                                location_id,
+                                scene_id,
+                            )
+
+                comfy_reference_slots = (
+                    character_reference_slots + [location_reference_path]
+                )
+                compact_reference_paths = [
+                    path for path in character_reference_slots if path is not None
+                ]
+                if location_reference_path is not None:
+                    compact_reference_paths.append(location_reference_path)
+                reference_count = len(compact_reference_paths)
 
                 prompt = self.scene_image_prompt(
                     scene,
@@ -1087,7 +1110,7 @@ SCENE DESCRIPTION:
                 )
 
                 record["status"] = "running"
-                record["reference_count"] = len(reference_paths)
+                record["reference_count"] = reference_count
                 self.save_manifest(project_path, manifest)
 
                 try:
@@ -1095,7 +1118,7 @@ SCENE DESCRIPTION:
                         result = await ComfyUISceneImageGenerator().generate(
                             prompt=prompt,
                             output_path=output_path,
-                            reference_images=reference_paths,
+                            reference_images=comfy_reference_slots,
                             scene_id=scene_id,
                             aspect_ratio=aspect_ratio,
                         )
@@ -1113,7 +1136,7 @@ SCENE DESCRIPTION:
                         "path": self.relative_path(
                             project_path, output_path
                         ),
-                        "reference_count": len(reference_paths),
+                        "reference_count": reference_count,
                         "model": result["model"]
                     })
 
