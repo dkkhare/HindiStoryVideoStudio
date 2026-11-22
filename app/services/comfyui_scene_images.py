@@ -195,7 +195,7 @@ class ComfyUISceneImageGenerator:
                 "width": width, "height": height, "batch_size": 1
             })
 
-        safe_scene = re.sub(r"[^\\w.-]+", "_", str(scene_id)).strip("._") or "scene"
+        safe_scene = re.sub(r"[^\w.-]+", "_", str(scene_id)).strip("._") or "scene"
         for node in workflow.values():
             if node.get("class_type") == "SaveImage":
                 node.setdefault("inputs", {})["filename_prefix"] = f"HindiStoryStudio/{safe_scene}"
