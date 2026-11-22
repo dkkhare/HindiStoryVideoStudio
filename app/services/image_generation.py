@@ -1126,7 +1126,7 @@ SCENE DESCRIPTION:
                         result = await self.create_image(
                             prompt,
                             output_path,
-                            reference_paths,
+                            compact_reference_paths,
                             aspect_ratio,
                             image_size
                         )
