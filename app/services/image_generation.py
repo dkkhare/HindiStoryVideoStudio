@@ -9,6 +9,7 @@ from google import genai
 
 from app.config import settings
 from app.services.gemini import GeminiService
+from app.services.comfyui_scene_images import ComfyUISceneImageGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -1000,18 +1001,8 @@ SCENE DESCRIPTION:
 
         references = manifest.get("references", {})
 
-        # Require all master references to be generated.
-        for group in ("characters", "props", "locations"):
-            for asset_id, record in references.get(group, {}).items():
-                path = project_path / record.get("path", "")
-
-                if (
-                    record.get("status") != "completed"
-                    or not self.valid_image(path)
-                ):
-                    raise RuntimeError(
-                        f"Reference image is not ready: {asset_id}"
-                    )
+        # References are optional per scene. Missing or unused assets must not
+        # block text-only generation or scenes that use a different cast.
 
         (project_path / "scenes").mkdir(
             parents=True,
@@ -1066,34 +1057,50 @@ SCENE DESCRIPTION:
                 prop_ids = mapping.get("prop_ids", [])
                 location_ids = mapping.get("location_ids", [])
 
-                reference_paths = []
-
-                # Model supports up to 4 character references
-                # and 10 object references in this workflow.
+                # Keep four character positions stable: the ComfyUI workflow has
+                # character slots 1-4 and a dedicated location slot 5.
+                character_reference_slots = []
                 for character_id in character_ids[:4]:
+                    record_ref = references.get("characters", {}).get(character_id)
+                    candidate = None
+                    if record_ref and record_ref.get("status") == "completed":
+                        candidate = project_path / record_ref.get("path", "")
+                        if not self.valid_image(candidate):
+                            logger.warning(
+                                "Skipping unavailable character reference %s for %s",
+                                character_id,
+                                scene_id,
+                            )
+                            candidate = None
+                    character_reference_slots.append(candidate)
 
-                    record_ref = references.get(
-                        "characters", {}
-                    ).get(character_id)
+                character_reference_slots.extend(
+                    [None] * (4 - len(character_reference_slots))
+                )
 
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
-                        )
+                location_reference_path = None
+                for location_id in location_ids[:1]:
+                    record_ref = references.get("locations", {}).get(location_id)
+                    if record_ref and record_ref.get("status") == "completed":
+                        candidate = project_path / record_ref.get("path", "")
+                        if self.valid_image(candidate):
+                            location_reference_path = candidate
+                        else:
+                            logger.warning(
+                                "Skipping unavailable location reference %s for %s",
+                                location_id,
+                                scene_id,
+                            )
 
-                object_ids = prop_ids + location_ids
-
-                for asset_id in object_ids[:10]:
-
-                    record_ref = (
-                        references.get("props", {}).get(asset_id)
-                        or references.get("locations", {}).get(asset_id)
-                    )
-
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
-                        )
+                comfy_reference_slots = (
+                    character_reference_slots + [location_reference_path]
+                )
+                compact_reference_paths = [
+                    path for path in character_reference_slots if path is not None
+                ]
+                if location_reference_path is not None:
+                    compact_reference_paths.append(location_reference_path)
+                reference_count = len(compact_reference_paths)
 
                 prompt = self.scene_image_prompt(
                     scene,
@@ -1103,24 +1110,33 @@ SCENE DESCRIPTION:
                 )
 
                 record["status"] = "running"
-                record["reference_count"] = len(reference_paths)
+                record["reference_count"] = reference_count
                 self.save_manifest(project_path, manifest)
 
                 try:
-                    result = await self.create_image(
-                        prompt,
-                        output_path,
-                        reference_paths,
-                        aspect_ratio,
-                        image_size
-                    )
+                    if settings.scene_image_provider.lower() == "comfyui":
+                        result = await ComfyUISceneImageGenerator().generate(
+                            prompt=prompt,
+                            output_path=output_path,
+                            reference_images=comfy_reference_slots,
+                            scene_id=scene_id,
+                            aspect_ratio=aspect_ratio,
+                        )
+                    else:
+                        result = await self.create_image(
+                            prompt,
+                            output_path,
+                            compact_reference_paths,
+                            aspect_ratio,
+                            image_size
+                        )
 
                     record.update({
                         "status": "completed",
                         "path": self.relative_path(
                             project_path, output_path
                         ),
-                        "reference_count": len(reference_paths),
+                        "reference_count": reference_count,
                         "model": result["model"]
                     })
 

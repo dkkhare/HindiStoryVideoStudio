@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_client_id: str = "hindi-story-studio"
     comfyui_workflow_json: Path = Path("./workflows/ltx25_i2v_api.json")
+    comfyui_image_workflow_json: Path = Path("./workflows/automatic_reference_api.json")
+    scene_image_provider: str = "comfyui"
+    comfyui_image_timeout_seconds: int = 900
     comfyui_output_dir: str = ""
 
     f5tts_base_url: str = "http://127.0.0.1:7860"
