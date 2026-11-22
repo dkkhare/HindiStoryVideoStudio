@@ -103,6 +103,29 @@ class ComfyUISceneImageGenerator:
         subfolder = data.get("subfolder", "")
         return f"{subfolder}/{uploaded_name}" if subfolder else uploaded_name
 
+    @staticmethod
+    def _dimensions(aspect_ratio: str) -> tuple[int, int]:
+        try:
+            width_ratio, height_ratio = (
+                float(part) for part in str(aspect_ratio).split(":", 1)
+            )
+            if width_ratio <= 0 or height_ratio <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            width_ratio, height_ratio = 16.0, 9.0
+
+        if abs(width_ratio / height_ratio - 1.0) < 0.03:
+            return 512, 512
+
+        long_side = 640
+        if width_ratio >= height_ratio:
+            width = long_side
+            height = round((long_side * height_ratio / width_ratio) / 8) * 8
+        else:
+            height = long_side
+            width = round((long_side * width_ratio / height_ratio) / 8) * 8
+        return max(256, width), max(256, height)
+
     def _prepare_workflow(
         self,
         workflow: dict,
@@ -110,6 +133,7 @@ class ComfyUISceneImageGenerator:
         negative_prompt: str,
         uploaded_references: list[str],
         scene_id: str,
+        aspect_ratio: str = "16:9",
     ) -> dict:
         sampler_id, sampler = self._find_one(workflow, "KSampler")
 
@@ -159,6 +183,18 @@ class ComfyUISceneImageGenerator:
 
         sampler.setdefault("inputs", {})["seed"] = random.randint(0, 2**53 - 1)
 
+        latent_nodes = [
+            node for node in workflow.values()
+            if node.get("class_type") == "EmptyLatentImage"
+        ]
+        if len(latent_nodes) > 1:
+            raise ValueError("Expected at most one EmptyLatentImage node")
+        if latent_nodes:
+            width, height = self._dimensions(aspect_ratio)
+            latent_nodes[0].setdefault("inputs", {}).update({
+                "width": width, "height": height, "batch_size": 1
+            })
+
         safe_scene = re.sub(r"[^\\w.-]+", "_", str(scene_id)).strip("._") or "scene"
         for node in workflow.values():
             if node.get("class_type") == "SaveImage":
@@ -173,6 +209,11 @@ class ComfyUISceneImageGenerator:
             response.raise_for_status()
             history = response.json()
             entry = history.get(prompt_id, history) if isinstance(history, dict) else {}
+            status = entry.get("status", {}) if isinstance(entry, dict) else {}
+            if isinstance(status, dict) and status.get("status_str") == "error":
+                raise RuntimeError(
+                    f"ComfyUI image job failed: {status.get('messages', status)}"
+                )
             outputs = entry.get("outputs", {}) if isinstance(entry, dict) else {}
 
             for node_output in outputs.values():
@@ -201,6 +242,7 @@ class ComfyUISceneImageGenerator:
         output_path: Path,
         reference_images: list[Path],
         scene_id: str,
+        aspect_ratio: str = "16:9",
         negative_prompt: str = (
             "blurry, low quality, distorted anatomy, deformed body, extra limbs, "
             "duplicate characters, merged characters, missing characters, "
@@ -217,7 +259,7 @@ class ComfyUISceneImageGenerator:
                 uploaded.append(await self._upload_image(client, Path(image_path)))
 
             workflow = self._prepare_workflow(
-                workflow, prompt, negative_prompt, uploaded, scene_id
+                workflow, prompt, negative_prompt, uploaded, scene_id, aspect_ratio
             )
             response = await client.post(
                 f"{self.base_url}/prompt",
