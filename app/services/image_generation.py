@@ -9,6 +9,7 @@ from google import genai
 
 from app.config import settings
 from app.services.gemini import GeminiService
+from app.services.comfyui_scene_images import ComfyUISceneImageGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -1000,18 +1001,8 @@ SCENE DESCRIPTION:
 
         references = manifest.get("references", {})
 
-        # Require all master references to be generated.
-        for group in ("characters", "props", "locations"):
-            for asset_id, record in references.get(group, {}).items():
-                path = project_path / record.get("path", "")
-
-                if (
-                    record.get("status") != "completed"
-                    or not self.valid_image(path)
-                ):
-                    raise RuntimeError(
-                        f"Reference image is not ready: {asset_id}"
-                    )
+        # References are optional per scene. Missing or unused assets must not
+        # block text-only generation or scenes that use a different cast.
 
         (project_path / "scenes").mkdir(
             parents=True,
@@ -1068,32 +1059,25 @@ SCENE DESCRIPTION:
 
                 reference_paths = []
 
-                # Model supports up to 4 character references
-                # and 10 object references in this workflow.
+                # Four character slots and one optional location slot are
+                # populated only from this scene's screenplay/asset mapping.
                 for character_id in character_ids[:4]:
+                    record_ref = references.get("characters", {}).get(character_id)
+                    if record_ref and record_ref.get("status") == "completed":
+                        candidate = project_path / record_ref.get("path", "")
+                        if self.valid_image(candidate):
+                            reference_paths.append(candidate)
+                        else:
+                            logger.warning("Skipping unavailable character reference %s for %s", character_id, scene_id)
 
-                    record_ref = references.get(
-                        "characters", {}
-                    ).get(character_id)
-
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
-                        )
-
-                object_ids = prop_ids + location_ids
-
-                for asset_id in object_ids[:10]:
-
-                    record_ref = (
-                        references.get("props", {}).get(asset_id)
-                        or references.get("locations", {}).get(asset_id)
-                    )
-
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
-                        )
+                for location_id in location_ids[:1]:
+                    record_ref = references.get("locations", {}).get(location_id)
+                    if record_ref and record_ref.get("status") == "completed":
+                        candidate = project_path / record_ref.get("path", "")
+                        if self.valid_image(candidate):
+                            reference_paths.append(candidate)
+                        else:
+                            logger.warning("Skipping unavailable location reference %s for %s", location_id, scene_id)
 
                 prompt = self.scene_image_prompt(
                     scene,
@@ -1107,13 +1091,21 @@ SCENE DESCRIPTION:
                 self.save_manifest(project_path, manifest)
 
                 try:
-                    result = await self.create_image(
-                        prompt,
-                        output_path,
-                        reference_paths,
-                        aspect_ratio,
-                        image_size
-                    )
+                    if settings.scene_image_provider.lower() == "comfyui":
+                        result = await ComfyUISceneImageGenerator().generate(
+                            prompt=prompt,
+                            output_path=output_path,
+                            reference_images=reference_paths,
+                            scene_id=scene_id,
+                        )
+                    else:
+                        result = await self.create_image(
+                            prompt,
+                            output_path,
+                            reference_paths,
+                            aspect_ratio,
+                            image_size
+                        )
 
                     record.update({
                         "status": "completed",
