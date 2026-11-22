@@ -1097,6 +1097,7 @@ SCENE DESCRIPTION:
                             output_path=output_path,
                             reference_images=reference_paths,
                             scene_id=scene_id,
+                            aspect_ratio=aspect_ratio,
                         )
                     else:
                         result = await self.create_image(
