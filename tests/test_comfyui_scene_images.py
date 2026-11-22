@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 from app.services.comfyui_scene_images import ComfyUISceneImageGenerator
 
@@ -50,6 +52,59 @@ class DynamicComfyWorkflowTests(unittest.TestCase):
 
         self.assertEqual(result["9"]["inputs"]["model"], ["2", 0])
         self.assertEqual(result["7"]["inputs"]["text"], "Forest at sunrise")
+
+
+    def test_exported_workflow_preserves_character_and_location_slots(self):
+        workflow_path = (
+            Path(__file__).resolve().parents[1]
+            / "workflows"
+            / "automatic_reference_api.json"
+        )
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+
+        result = ComfyUISceneImageGenerator()._prepare_workflow(
+            workflow,
+            prompt="A grandmother telling a story to a child",
+            negative_prompt="blur",
+            uploaded_references=[
+                "input/CHAR_001.png",
+                None,
+                None,
+                None,
+                "input/LOCATION.png",
+            ],
+            scene_id="SCENE_007",
+            aspect_ratio="16:9",
+        )
+
+        self.assertEqual(result["20"]["inputs"]["image"], "input/CHAR_001.png")
+        self.assertEqual(result["28"]["inputs"]["image"], "input/LOCATION.png")
+        self.assertEqual(result["22"]["inputs"]["image"], "CHAR_002.png")
+        self.assertEqual(result["9"]["inputs"]["text"], "A grandmother telling a story to a child")
+        self.assertEqual(result["10"]["inputs"]["text"], "blur")
+        self.assertEqual(result["11"]["inputs"]["width"], 640)
+        self.assertEqual(result["11"]["inputs"]["height"], 360)
+        self.assertEqual(result["13"]["inputs"]["filename_prefix"], "HindiStoryStudio/SCENE_007")
+
+    def test_exported_workflow_bypasses_all_five_empty_adapters(self):
+        workflow_path = (
+            Path(__file__).resolve().parents[1]
+            / "workflows"
+            / "automatic_reference_api.json"
+        )
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+
+        result = ComfyUISceneImageGenerator()._prepare_workflow(
+            workflow,
+            prompt="A quiet forest at sunrise",
+            negative_prompt="",
+            uploaded_references=[None, None, None, None, None],
+            scene_id="SCENE_008",
+        )
+
+        self.assertEqual(result["3"]["inputs"]["model"], ["1", 0])
+        self.assertEqual(result["9"]["inputs"]["text"], "A quiet forest at sunrise")
+
 
 
 if __name__ == "__main__":
