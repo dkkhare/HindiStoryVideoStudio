@@ -32,20 +32,42 @@ Gemini structured screenplay generation, project folder creation, health checks,
 ComfyUI queue/history client foundation, TTS provider interfaces, production-stage
 records and resumable stage state.
 
-Provider-specific image/TTS/video workflow execution is intentionally adapter-based.
-The ComfyUI workflow JSON must be exported in API format and node IDs mapped in
-`workflows/ltx25_i2v_api.json` before a real LTX job can run. No API keys are stored
-in the database or source code.
+Scene-image generation is routed through the generic ComfyUI API workflow by default.
+The Studio reads each scene's `characters` array and its asset-bible location mapping,
+then selects up to four character reference images and one location reference image.
+Unused IPAdapter stages are bypassed. A scene with no usable references is generated
+from its text prompt alone. Workflow node IDs are discovered from the API graph at
+runtime; scene names, character IDs, prompts, and image filenames are not hardcoded.
+
+Configure the following in the Studio `.env` file (use the actual path on your PC):
+
+```env
+COMFYUI_BASE_URL=http://127.0.0.1:8188
+COMFYUI_IMAGE_WORKFLOW_JSON=D:/studio/ComfyUI_windows_portable/ComfyUI/automatic_reference_api.json
+SCENE_IMAGE_PROVIDER=comfyui
+COMFYUI_IMAGE_TIMEOUT_SECONDS=900
+```
+
+Export the generic reference workflow from ComfyUI using `File → Export (API)`.
+It must contain one KSampler, positive and negative CLIPTextEncode nodes, and a model
+chain with up to four character IPAdapterAdvanced stages plus one location stage.
+Each adapter image input must be connected to a LoadImage node. The Studio uploads
+only selected images to ComfyUI and bypasses unused stages, so no placeholder mask or
+image files are needed.
+
+The existing `COMFYUI_WORKFLOW_JSON` setting remains reserved for LTX video jobs.
+No API keys are stored in the database or source code.
 
 ## Important integration notes
 
+- Character, prop, and location master-reference creation remains in the existing
+  reference-generation stage; ComfyUI is used for final scene-frame generation.
+- The scene prompt retains the complete screenplay visual locks, including props,
+  even though the current reference workflow exposes character and location slots.
 - Gemini TTS is not voice cloning. Use F5-TTS for reference-audio voice cloning where
   your F5-TTS server exposes a compatible API.
-- Gemini image generation uses reference images only when the selected model/API
-  supports image inputs. Keep approved references and prompts in each project.
-- LTX-2.5 workflows differ by ComfyUI graph and custom nodes. The adapter expects a
-  workflow API JSON file with configurable node IDs; inspect your exported workflow
-  and update the mapping in `app/services/comfyui.py`.
+- LTX-2.5 workflows differ by ComfyUI graph and custom nodes. The separate video
+  adapter continues to use the configured LTX API workflow.
 - Keep scene assets named by stable IDs (`SCENE_001`, `SEG_001`). Never rely on
   provider-generated filenames.
 - Always review provider terms, consent, and rights before cloning or synthesizing a
