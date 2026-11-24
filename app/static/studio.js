@@ -295,6 +295,25 @@ function addProjectPanel(title, description = "") {
     p.textContent = `${project.target_duration_minutes || "—"} min · ${project.language || "Language not set"} · ${project.status || "Draft"}`;
     copy.append(eyebrow, h1, p);
     heading.appendChild(copy);
+
+    const deleteProjectButton = createButton("Delete project", async button => {
+        const confirmed = window.confirm(`Permanently delete "${project.title || "this project"}" and all of its files and generated data? This cannot be undone.`);
+        if (!confirmed) return;
+        button.disabled = true;
+        button.textContent = "Deleting…";
+        try {
+            await api(`/api/projects/${project.id}`, { method: "DELETE" });
+            if (Number(activeProjectId) === Number(project.id)) activeProjectId = null;
+            await loadProjects();
+            setPage("overview", "Overview");
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = "Delete project";
+            window.alert(`Could not delete project: ${error.message}`);
+        }
+    });
+    deleteProjectButton.className = "danger-button";
+    heading.appendChild(deleteProjectButton);
     root.appendChild(heading);
 
     const tabs = document.createElement("div");
