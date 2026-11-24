@@ -1,6 +1,7 @@
 
 import json
 import logging
+import shutil
 import wave
 import httpx
 from pathlib import Path
@@ -191,6 +192,41 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(get_db)):
+    """Permanently delete a project, its database records, and its complete workspace."""
+    project = get_project_or_404(project_id, db)
+
+    if audio_worker_active(project_id) or video_worker_active(project_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete this project while audio or video production is running. Stop the active production first.",
+        )
+
+    if any(stage.status == StageStatus.running for stage in project.stages):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete this project while a production stage is running.",
+        )
+
+    project_root = Path(settings.projects_dir).resolve()
+    workspace = Path(project.project_path).resolve()
+    try:
+        workspace.relative_to(project_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Project workspace is outside the configured projects directory.") from exc
+
+    if workspace == project_root:
+        raise HTTPException(status_code=400, detail="Refusing to delete the projects directory itself.")
+
+    if workspace.exists():
+        shutil.rmtree(workspace)
+
+    db.delete(project)
+    db.commit()
+    return {"ok": True, "message": "Project and all associated files were deleted."}
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
