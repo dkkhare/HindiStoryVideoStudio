@@ -215,3 +215,5 @@ button.danger:hover{background:#ffe4e5}
 .project-detail-view .video-scene{min-width:0;padding:14px;border:1px solid var(--line);border-radius:11px;background:#fff}
 @media(max-width:900px){.overview-shortcuts{grid-template-columns:1fr}.project-nav-list{max-height:38vh}}
 @media(max-width:700px){.project-detail-heading{display:block}.project-stage-tabs{overflow-x:auto;flex-wrap:nowrap}.project-stage-tabs button{white-space:nowrap}}
+
+.danger-button{padding:10px 14px;border:1px solid #f1c5c5;border-radius:9px;background:#fff5f5;color:#b42318;font:700 12px "DM Sans",sans-serif;cursor:pointer}.danger-button:hover{background:#fee4e2}.danger-button:disabled{opacity:.6;cursor:wait}
