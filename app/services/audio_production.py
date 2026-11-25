@@ -7,7 +7,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
-from app.services.tts import VoiceboxTTSProvider
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider
 
 logger = logging.getLogger(__name__)
 _TASKS: dict[int, asyncio.Task] = {}
@@ -142,6 +142,7 @@ async def _run_worker(
     project_path: Path,
     language: str,
     engine: str,
+    provider_config: dict | None = None,
 ) -> None:
     manifest = read_manifest(project_path)
     if not manifest:
@@ -152,7 +153,15 @@ async def _run_worker(
     write_manifest(project_path, manifest)
     _set_stage(project_id, StageStatus.running, "Audio generation started/resumed.")
 
-    provider = VoiceboxTTSProvider()
+    provider_config = provider_config or {}
+    provider_name = str(provider_config.get("provider") or "voicebox").lower()
+    if provider_name == "kvoice":
+        provider = KVoiceTTSProvider(
+            provider_config.get("api_url", ""),
+            provider_config.get("api_key", ""),
+        )
+    else:
+        provider = VoiceboxTTSProvider()
     segments = manifest.get("segments") or []
     assignments = manifest.get("voice_assignments") or []
     assignment_map = {item["speaker_id"]: item["profile_id"] for item in assignments}
@@ -271,12 +280,12 @@ async def _run_worker(
         _CONTROLS.pop(project_id, None)
 
 
-def start_audio_worker(project_id: int, project_path: Path, language: str, engine: str) -> bool:
+def start_audio_worker(project_id: int, project_path: Path, language: str, engine: str, provider_config: dict | None = None) -> bool:
     task = _TASKS.get(project_id)
     if task and not task.done():
         return False
     _TASKS[project_id] = asyncio.create_task(
-        _run_worker(project_id, Path(project_path), language, engine)
+        _run_worker(project_id, Path(project_path), language, engine, provider_config)
     )
     return True
 
