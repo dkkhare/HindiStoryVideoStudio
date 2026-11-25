@@ -19,3 +19,10 @@ def get_db():
 def init_db() -> None:
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    # Lightweight forward migration for existing SQLite installations.
+    if settings.database_url.startswith("sqlite"):
+        from sqlalchemy import inspect, text
+        columns = {item["name"] for item in inspect(engine).get_columns("projects")}
+        if "provider_config_json" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE projects ADD COLUMN provider_config_json TEXT"))
