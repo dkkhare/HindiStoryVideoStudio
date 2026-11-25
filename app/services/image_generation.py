@@ -97,19 +97,51 @@ ASSET_BIBLE_SCHEMA = {
 class ImageGenerationService:
 
     def __init__(self, image_provider: str = "gemini", kimage_config: dict | None = None):
-        self.gemini = GeminiService()
-        self.image_provider = (image_provider or "gemini").lower()
+        self.image_provider = (image_provider or "gemini").strip().lower()
+        if self.image_provider not in {"gemini", "kimage"}:
+            raise ValueError("Image provider must be either Gemini or kImage.")
+
         self.kimage_config = kimage_config or {}
-        self.kimage = KImageComfyAPI(self.kimage_config.get("api_url", ""), self.kimage_config.get("api_key", ""), self.kimage_config.get("workflow_json", "")) if self.image_provider == "kimage" else None
+        # Provider clients are created lazily. Status/manifest operations must
+        # not initialize Gemini or require kImage credentials.
+        self.gemini = None
+        self.kimage = None
+        self.client = None
 
-        self.client = genai.Client(
-            api_key=settings.gemini_api_key
+        # Legacy .env values are upgraded at runtime; image provider selection
+        # never changes the separate text-analysis model.
+        self.text_model = (
+            "gemini-3.8-flash"
+            if settings.gemini_text_model == "gemini-2.5-flash"
+            else settings.gemini_text_model
         )
-
-        self.text_model = ("gemini-3.8-flash" if settings.gemini_text_model == "gemini-2.5-flash" else settings.gemini_text_model)
         self.semaphore = asyncio.Semaphore(
             max(1, settings.max_parallel_image_jobs)
         )
+
+    def _get_gemini_image_provider(self):
+        if self.gemini is None:
+            self.gemini = GeminiService()
+        return self.gemini
+
+    def _get_kimage_provider(self):
+        if self.kimage is None:
+            self.kimage = KImageComfyAPI(
+                self.kimage_config.get("api_url", ""),
+                self.kimage_config.get("api_key", ""),
+                self.kimage_config.get("workflow_json", ""),
+            )
+        return self.kimage
+
+    def _get_text_client(self):
+        if self.client is None:
+            if not settings.gemini_api_key:
+                raise RuntimeError(
+                    "GEMINI_API_KEY is required for screenplay asset analysis. "
+                    "This is a text-analysis step; image rendering still uses the selected image provider."
+                )
+            self.client = genai.Client(api_key=settings.gemini_api_key)
+        return self.client
 
     # ---------------------------------------------------------
     # FILE HELPERS
@@ -380,8 +412,9 @@ Return an asset_states entry for every scene, even when entities is empty.
 
         logger.info("Generating project asset bible")
 
+        text_client = self._get_text_client()
         interaction = await asyncio.to_thread(
-            self.client.interactions.create,
+            text_client.interactions.create,
             model=self.text_model,
             input=prompt,
             response_format={
@@ -832,8 +865,12 @@ SCENE DESCRIPTION:
 """
         async with self.semaphore:
             if self.image_provider == "kimage":
-                return await self.kimage.generate_image(prompt, output_path, reference_images, aspect_ratio, image_size)
-            return await self.gemini.generate_image(
+                provider = self._get_kimage_provider()
+                return await provider.generate_image(
+                    prompt, output_path, reference_images, aspect_ratio, image_size
+                )
+            provider = self._get_gemini_image_provider()
+            return await provider.generate_image(
                 prompt=prompt,
                 output_path=output_path,
                 reference_images=reference_images,
