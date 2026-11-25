@@ -23,7 +23,7 @@ from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGene
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
-from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider, VoiceStudioTTSProvider
 from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
 from app.services.video_production import (
     read_manifest as read_video_manifest,
@@ -80,7 +80,7 @@ def _project_provider_config(project: Project) -> dict:
     except (TypeError, json.JSONDecodeError):
         saved = {}
     result = {}
-    for name in ("kimage", "kvoice"):
+    for name in ("kimage", "kvoice", "voice_studio"):
         item = saved.get(name) or {}
         encrypted = item.get("encrypted_api_key") or ""
         key = decrypt_api_key(encrypted) if encrypted else ""
@@ -100,8 +100,8 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
     provider = str(payload.get("provider") or "").strip().lower()
     api_url = str(payload.get("api_url") or "").strip().rstrip("/")
     api_key = str(payload.get("api_key") or "").strip()
-    if provider not in {"kimage", "kvoice"}:
-        raise HTTPException(status_code=400, detail="Choose kImage or kVoice to test.")
+    if provider not in {"kimage", "kvoice", "voice_studio"}:
+        raise HTTPException(status_code=400, detail="Choose kImage, kVoice or Voice Studio to test.")
     if not api_url:
         raise HTTPException(status_code=400, detail="Enter the server API URL first.")
     from urllib.parse import urlparse
@@ -121,7 +121,7 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
         if not api_key:
             raise HTTPException(status_code=400, detail="Enter the kVoice API key before testing.")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    check_url = f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/voices"
+    check_url = (f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0), follow_redirects=True) as client:
             response = await client.get(check_url, headers=headers)
@@ -153,7 +153,7 @@ def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
     except json.JSONDecodeError:
         saved = {}
     result = {}
-    for provider in ("kimage", "kvoice"):
+    for provider in ("kimage", "kvoice", "voice_studio"):
         item = saved.get(provider) or {}
         result[provider] = {
             "api_url": item.get("api_url", ""),
@@ -175,7 +175,7 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
         saved = json.loads(project.provider_config_json or "{}")
     except json.JSONDecodeError:
         saved = {}
-    for provider in ("kimage", "kvoice"):
+    for provider in ("kimage", "kvoice", "voice_studio"):
         incoming = payload.get(provider)
         if incoming is None:
             continue
@@ -787,6 +787,12 @@ async def list_project_audio_voices(project_id: int, provider: str = "voicebox",
             return await GeminiTTSProvider.list_voices()
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Could not load Gemini TTS voices: {exc}") from exc
+    if provider == "voice_studio":
+        config = _project_provider_config(project)["voice_studio"]
+        try:
+            return await VoiceStudioTTSProvider(config["api_url"] or "http://127.0.0.1:3900", config["api_key"]).list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Could not load Voice Studio voices: {exc}") from exc
     if provider == "kvoice":
         config = _project_provider_config(project)["kvoice"]
         try:
@@ -849,6 +855,12 @@ async def generate_project_audio(
             profiles = await kvoice.list_voices()
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Cannot connect to configured kVoice API: {exc}") from exc
+    elif audio_provider == "voice_studio":
+        try:
+            studio = VoiceStudioTTSProvider(provider_settings["voice_studio"]["api_url"] or "http://127.0.0.1:3900", provider_settings["voice_studio"]["api_key"])
+            profiles = await studio.list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Cannot connect to Voice Studio: {exc}") from exc
     else:
         audio_provider = "voicebox"
         try:
@@ -858,7 +870,7 @@ async def generate_project_audio(
 
     speakers = required_speakers(screenplay)
     required_ids = [item["id"] for item in speakers]
-    missing = [speaker_id for speaker_id in required_ids if not payload.voice_assignments.get(speaker_id)]
+    missing = [] if audio_provider == "voicebox" else [speaker_id for speaker_id in required_ids if not payload.voice_assignments.get(speaker_id)]
     if missing:
         raise HTTPException(
             status_code=400,
@@ -868,7 +880,7 @@ async def generate_project_audio(
     profile_map = {str(item.get("id") or item.get("voice_id") or item.get("name")): item for item in profiles}
     invalid_profiles = sorted({
         profile_id for profile_id in payload.voice_assignments.values()
-        if profile_id not in profile_map
+        if profile_id and profile_id not in profile_map
     })
     if invalid_profiles:
         raise HTTPException(status_code=400, detail=f"One or more selected {audio_provider} voice profiles are unavailable.")
@@ -919,8 +931,8 @@ async def generate_project_audio(
             "speaker_id": speaker["id"],
             "speaker_name": speaker["name"],
             "kind": speaker["kind"],
-            "profile_id": payload.voice_assignments[speaker["id"]],
-            "profile_name": profile_map[payload.voice_assignments[speaker["id"]]].get("name", payload.voice_assignments[speaker["id"]]),
+            "profile_id": payload.voice_assignments.get(speaker["id"]),
+            "profile_name": (profile_map.get(payload.voice_assignments.get(speaker["id"]) or "", {}).get("name") or payload.voice_assignments.get(speaker["id"]) or "Provider default"),
         }
         for speaker in speakers
     ]
@@ -939,6 +951,8 @@ async def generate_project_audio(
         "provider": audio_provider,
         "api_url": provider_settings["kvoice"]["api_url"] if audio_provider == "kvoice" else "",
         "api_key": provider_settings["kvoice"]["api_key"] if audio_provider == "kvoice" else "",
+        "voice_studio_api_url": provider_settings["voice_studio"]["api_url"] if audio_provider == "voice_studio" else "http://127.0.0.1:3900",
+        "voice_studio_api_key": provider_settings["voice_studio"]["api_key"] if audio_provider == "voice_studio" else "",
     }
     if not start_audio_worker(project_id, project_path, project.language, payload.engine, worker_config):
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
@@ -989,6 +1003,8 @@ async def resume_project_audio(
         "provider": provider_name,
         "api_url": saved_provider["kvoice"]["api_url"] if provider_name == "kvoice" else "",
         "api_key": saved_provider["kvoice"]["api_key"] if provider_name == "kvoice" else "",
+        "voice_studio_api_url": saved_provider["voice_studio"]["api_url"] or "http://127.0.0.1:3900",
+        "voice_studio_api_key": saved_provider["voice_studio"]["api_key"],
     }
     if not start_audio_worker(project_id, project_path, project.language, engine, worker_config):
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
