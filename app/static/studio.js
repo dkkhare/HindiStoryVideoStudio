@@ -924,7 +924,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     try {
         providerSettings = await api(`/api/projects/${project.id}/provider-settings`);
         selectedProvider = providerSettings.audio_provider || "voicebox";
-        profiles = await api(`/api/projects/${project.id}/audio/voices?provider=${selectedProvider}`);
+        profiles = await api(`/api/projects/${project.id}/audio/voices?provider=${selectedProvider}`).catch(() => []);
         screenplayData = await api(`/api/projects/${project.id}/screenplay`);
         manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
     } catch (error) {
@@ -960,20 +960,6 @@ async function renderAudioStage(workflow, project, audioStage) {
 
     const available = hindiProfiles.length ? hindiProfiles : profiles;
 
-    if (!available.length) {
-        setMessage(panel, `${selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
-        workflow.appendChild(panel);
-        return;
-    }
-
-    const savedAssignments = Object.fromEntries(
-        (manifest?.voice_assignments || []).map(item => [
-            item.speaker_id,
-            item.profile_id
-        ])
-    );
-
-    const selectors = {};
     const providerLabel = document.createElement("label");
     providerLabel.className = "voice-assignment";
     const providerTitle = document.createElement("span");
@@ -999,6 +985,22 @@ async function renderAudioStage(workflow, project, audioStage) {
             setMessage(panel, error.message);
         }
     });
+
+    if (!available.length) {
+        setMessage(panel, `${selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
+        workflow.appendChild(panel);
+        return;
+    }
+
+    const savedAssignments = Object.fromEntries(
+        (manifest?.voice_assignments || []).map(item => [
+            item.speaker_id,
+            item.profile_id
+        ])
+    );
+
+    const selectors = {};
+
 
     const assignmentSection = document.createElement("div");
     assignmentSection.className = "voice-assignment-list";
