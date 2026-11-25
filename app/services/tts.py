@@ -68,14 +68,13 @@ class VoiceboxTTSProvider(TTSProvider):
     async def synthesize_bytes(
         self,
         text: str,
-        profile_id: str,
+        profile_id: str | None = None,
         language: str = "Hindi",
         engine: str = "chatterbox",
     ) -> bytes:
         if not text or not text.strip():
             raise ValueError("Cannot synthesize empty text.")
         payload = {
-            "profile_id": profile_id,
             "text": text.strip(),
             "language": self.language_code(language),
             "engine": engine,
@@ -83,6 +82,8 @@ class VoiceboxTTSProvider(TTSProvider):
             "crossfade_ms": 50,
             "normalize": True,
         }
+        if profile_id:
+            payload["profile_id"] = profile_id
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(f"{self.base_url}/generate", json=payload)
@@ -140,8 +141,6 @@ class VoiceboxTTSProvider(TTSProvider):
         reference_audio: str | None = None,
         reference_text: str | None = None,
     ) -> str:
-        if not voice_id:
-            raise ValueError("Voicebox requires a voice profile ID.")
         audio = await self.synthesize_bytes(
             text=text,
             profile_id=voice_id,
@@ -287,6 +286,43 @@ class GeminiTTSProvider(TTSProvider):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(audio)
         return str(path)
+
+
+class VoiceStudioTTSProvider:
+    """OpenAI-compatible Voice Studio API adapter."""
+    def __init__(self, api_url: str, api_key: str = ""):
+        self.base_url = (api_url or "http://127.0.0.1:3900").rstrip("/")
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    async def _get_json(self, path: str):
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(f"{self.base_url}{path}", headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+
+    async def list_voices(self) -> list[dict]:
+        data = await self._get_json("/v1/audio/voices")
+        if isinstance(data, dict): data = data.get("voices", data.get("items", []))
+        if not isinstance(data, list): raise RuntimeError("Voice Studio voices response is invalid.")
+        return [x if isinstance(x, dict) else {"id": str(x), "name": str(x)} for x in data]
+
+    async def list_models(self) -> list[dict]:
+        data = await self._get_json("/v1/models")
+        if isinstance(data, dict): data = data.get("data", data.get("models", []))
+        return data if isinstance(data, list) else []
+
+    async def synthesize_bytes(self, text: str, profile_id: str | None = None, language: str = "Hindi", engine: str = "") -> bytes:
+        if not text or not text.strip(): raise ValueError("Cannot synthesize empty text.")
+        models = await self.list_models()
+        model_id = engine or (str(models[0].get("id")) if models and isinstance(models[0], dict) else "tts-1")
+        payload = {"model": model_id, "input": text.strip(), "voice": profile_id or "alloy", "response_format": "wav"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(1800, connect=30)) as client:
+            response = await client.post(f"{self.base_url}/v1/audio/speech", headers=self.headers, json=payload)
+            response.raise_for_status()
+            audio = response.content
+        if not audio.startswith(b"RIFF") or b"WAVE" not in audio[:16]:
+            raise RuntimeError("Voice Studio /v1/audio/speech did not return WAV audio; verify WAV response_format support.")
+        return audio
 
 
 class F5TTSProvider(TTSProvider):
