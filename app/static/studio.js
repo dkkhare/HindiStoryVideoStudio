@@ -921,7 +921,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     const available = hindiProfiles.length ? hindiProfiles : profiles;
 
     if (!available.length) {
-        setMessage(panel, "Voicebox returned no available voice profiles.");
+        setMessage(panel, `${selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
         workflow.appendChild(panel);
         return;
     }
@@ -995,7 +995,7 @@ async function renderAudioStage(workflow, project, audioStage) {
                 `${profile.default_engine ? " · " + profile.default_engine : ""}`;
 
             if (
-                String(profile.id) ===
+                String(profile.id || profile.voice_id || profile.name) ===
                 String(savedAssignments[speaker.id] || "")
             ) {
                 option.selected = true;
