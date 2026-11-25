@@ -540,7 +540,7 @@ async function renderImagesView(panel, project, stages) {
         providerPanel.appendChild(providerLabel);
         const providerHint = document.createElement("p");
         providerHint.className = "message";
-        providerHint.textContent = "Choose the service for scene images. Configure the kImage API URL, key and mandirImageKAPI.json under API Settings.";
+        providerHint.textContent = "The selected provider is used for character, prop, location and scene images. Configure the kImage API URL, key and mandirImageKAPI.json under API Settings.";
         providerPanel.appendChild(providerHint);
         panel.appendChild(providerPanel);
     } catch (error) {
@@ -562,6 +562,9 @@ async function renderImagesView(panel, project, stages) {
             async btn => {
                 btn.disabled = true;
                 try {
+                    // Persist the current choice before the reference endpoint
+                    // reads the project provider configuration.
+                    await saveImageProvider();
                     await api(`/api/projects/${project.id}/references/generate`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
