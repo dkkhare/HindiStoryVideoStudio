@@ -805,6 +805,28 @@ async def list_project_audio_voices(project_id: int, provider: str = "voicebox",
         raise HTTPException(status_code=503, detail=f"Could not load Voicebox profiles: {exc}") from exc
 
 
+@router.get("/projects/{project_id}/audio/models")
+async def list_project_audio_models(project_id: int, provider: str = "voice_studio", db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    if provider != "voice_studio":
+        raise HTTPException(status_code=400, detail="Model listing is currently supported for Voice Studio.")
+    config = _project_provider_config(project)["voice_studio"]
+    try:
+        return await VoiceStudioTTSProvider(config["api_url"] or "http://127.0.0.1:3900", config["api_key"]).list_models()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load Voice Studio models: {exc}") from exc
+
+
+@router.get("/projects/{project_id}/audio/models/{model_id}")
+async def get_project_audio_model(project_id: int, model_id: str, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    config = _project_provider_config(project)["voice_studio"]
+    try:
+        return await VoiceStudioTTSProvider(config["api_url"] or "http://127.0.0.1:3900", config["api_key"]).get_model(model_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load Voice Studio model details: {exc}") from exc
+
+
 @router.get("/voicebox/profiles")
 async def list_voicebox_profiles():
     """Return available local Voicebox voice profiles for the audio-stage selector."""
