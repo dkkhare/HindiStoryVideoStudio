@@ -880,10 +880,11 @@ async function renderAudioStage(workflow, project, audioStage) {
     let profiles;
     let manifest = null;
     let providerSettings = {};
+    let selectedProvider = "voicebox";
 
     try {
         providerSettings = await api(`/api/projects/${project.id}/provider-settings`);
-        const selectedProvider = providerSettings.audio_provider || "voicebox";
+        selectedProvider = providerSettings.audio_provider || "voicebox";
         profiles = await api(`/api/projects/${project.id}/audio/voices?provider=${selectedProvider}`);
         screenplayData = await api(`/api/projects/${project.id}/screenplay`);
         manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
@@ -914,8 +915,8 @@ async function renderAudioStage(workflow, project, audioStage) {
     });
 
     const hindiProfiles = profiles.filter(profile =>
-        String(profile.language || "").toLowerCase() === "hi" ||
-        String(profile.language || "").toLowerCase() === "hindi"
+        String(profile.language || profile.lang || "").toLowerCase() === "hi" ||
+        String(profile.language || profile.lang || "").toLowerCase() === "hindi"
     );
 
     const available = hindiProfiles.length ? hindiProfiles : profiles;
