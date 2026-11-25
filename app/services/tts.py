@@ -246,13 +246,7 @@ class GeminiTTSProvider(TTSProvider):
         response = await asyncio.to_thread(
             self.client.models.generate_content,
             model=self.model,
-            contents=[{
-                "role": "user",
-                "parts": [{
-                    "text": text.strip(),
-                    "speech_metadata": {"style": engine} if engine else {},
-                }],
-            }],
+            contents=[text.strip()],
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=types.SpeechConfig(
