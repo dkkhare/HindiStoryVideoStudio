@@ -838,17 +838,14 @@ async function renderAudioStage(workflow, project, audioStage) {
     let screenplayData;
     let profiles;
     let manifest = null;
+    let providerSettings = {};
 
     try {
-        [screenplayData, profiles] = await Promise.all([
-            api(`/api/projects/${project.id}/screenplay`),
-            api("/api/voicebox/profiles")
-        ]);
-
-        manifest = await api(
-            `/api/projects/${project.id}/audio`
-        ).catch(() => null);
-
+        providerSettings = await api(`/api/projects/${project.id}/provider-settings`);
+        const selectedProvider = providerSettings.audio_provider || "voicebox";
+        profiles = await api(`/api/projects/${project.id}/audio/voices?provider=${selectedProvider}`);
+        screenplayData = await api(`/api/projects/${project.id}/screenplay`);
+        manifest = await api(`/api/projects/${project.id}/audio`).catch(() => null);
     } catch (error) {
         setMessage(panel, `Audio setup unavailable: ${error.message}`);
         workflow.appendChild(panel);
@@ -896,6 +893,29 @@ async function renderAudioStage(workflow, project, audioStage) {
     );
 
     const selectors = {};
+    const providerLabel = document.createElement("label");
+    providerLabel.className = "voice-assignment";
+    const providerTitle = document.createElement("span");
+    providerTitle.textContent = "Audio provider";
+    const providerSelect = document.createElement("select");
+    for (const [value, labelText] of [["voicebox", "Voicebox (local)"], ["kvoice", "kVoice (Kaggle API)"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = labelText;
+        option.selected = (providerSettings.audio_provider || "voicebox") === value;
+        providerSelect.appendChild(option);
+    }
+    providerLabel.append(providerTitle, providerSelect);
+    panel.appendChild(providerLabel);
+    providerSelect.addEventListener("change", async () => {
+        try {
+            const nextProfiles = await api(`/api/projects/${project.id}/audio/voices?provider=${providerSelect.value}`);
+            setMessage(panel, `Loaded ${nextProfiles.length} voice profiles. Reload this section to reassign voices.`);
+        } catch (error) {
+            setMessage(panel, error.message);
+        }
+    });
+
     const assignmentSection = document.createElement("div");
     assignmentSection.className = "voice-assignment-list";
 
@@ -1134,7 +1154,8 @@ async function renderAudioStage(workflow, project, audioStage) {
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 voice_assignments: voiceAssignments,
-                                engine: "chatterbox"
+                                engine: "chatterbox",
+                                provider: providerSelect.value
                             })
                         }
                     );
