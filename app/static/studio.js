@@ -646,7 +646,7 @@ async function renderImagesView(panel, project, stages) {
 async function renderProviderSettings(panel, project) {
     const intro = document.createElement("p");
     intro.className = "message";
-    intro.textContent = "Choose the active image and audio providers. Gemini and Voicebox remain available; kImage and kVoice use the hosted Kaggle APIs configured below. Credentials are encrypted in the project database.";
+    intro.textContent = "Choose the active image and audio providers. Gemini, Voicebox, kVoice and Voice Studio are supported. Provider credentials are encrypted in the project database.";
     panel.appendChild(intro);
     let settings;
     try {
@@ -679,7 +679,7 @@ async function renderProviderSettings(panel, project) {
         return select;
     };
     const imageChoice = makeProviderSelect("Image generation", "image_provider", [["gemini","Gemini API"],["kimage","kImage (hosted ComfyUI)"]], settings.image_provider || "gemini");
-    const audioChoice = makeProviderSelect("Audio generation", "audio_provider", [["gemini","Gemini API (Google TTS)"],["voicebox","Voicebox (local)"],["kvoice","kVoice (hosted API)"]], settings.audio_provider || "voicebox");
+    const audioChoice = makeProviderSelect("Audio generation", "audio_provider", [["gemini","Gemini API (Google TTS)"],["voicebox","Voicebox (local)"],["kvoice","kVoice (hosted API)"],["voice_studio","Voice Studio"]], settings.audio_provider || "voicebox");
     const saveChoices = createButton("Save provider selection", async button => {
         button.disabled = true;
         try {
@@ -695,7 +695,7 @@ async function renderProviderSettings(panel, project) {
     activeProviders.appendChild(saveChoices);
     panel.appendChild(activeProviders);
 
-    for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"]]) {
+    for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"], ["voice_studio", "Voice Studio — OpenAI-compatible TTS"]]) {
         const saved = settings[key] || {};
         const card = document.createElement("section");
         card.className = "panel";
@@ -711,8 +711,8 @@ async function renderProviderSettings(panel, project) {
         url.type = "url";
         url.name = "api_url";
         url.required = false;
-        url.placeholder = "https://your-comfyui-endpoint.example";
-        url.value = saved.api_url || "";
+        url.placeholder = key === "voice_studio" ? "http://127.0.0.1:3900" : "https://your-comfyui-endpoint.example";
+        url.value = saved.api_url || (key === "voice_studio" ? "http://127.0.0.1:3900" : "");
         urlLabel.appendChild(url);
         form.appendChild(urlLabel);
 
@@ -722,19 +722,19 @@ async function renderProviderSettings(panel, project) {
         apiKey.type = "password";
         apiKey.name = "api_key";
         apiKey.autocomplete = "new-password";
-        apiKey.placeholder = saved.api_key_configured ? "Leave blank to keep saved key" : "Enter API key";
+        apiKey.placeholder = saved.api_key_configured ? "Leave blank to keep saved key" : key === "voice_studio" ? "Optional bearer key (if enabled)" : "Enter API key";
         keyLabel.appendChild(apiKey);
         form.appendChild(keyLabel);
 
         const workflowLabel = document.createElement("label");
-        workflowLabel.textContent = key === "kimage" ? "ComfyUI workflow JSON — mandirImageKAPI.json (Workflow → Export → API)" : "kVoice settings (workflow JSON not required)";
+        workflowLabel.textContent = key === "kimage" ? "ComfyUI workflow JSON — mandirImageKAPI.json (Workflow → Export → API)" : key === "kvoice" ? "kVoice settings (workflow JSON not required)" : "Voice Studio settings (workflow JSON not required)";
         const workflow = document.createElement("textarea");
         workflow.name = "workflow_json";
         workflow.rows = 14;
-        workflow.disabled = key === "kvoice";
-        if (key === "kvoice") workflow.placeholder = "kVoice uses its /v1/tts API; no workflow JSON is needed.";
+        workflow.disabled = key !== "kimage";
+        if (key !== "kimage") workflow.placeholder = key === "kvoice" ? "kVoice uses its /v1/tts API; no workflow JSON is needed." : "Voice Studio uses /v1/audio/speech; no workflow JSON is needed.";
         workflow.spellcheck = false;
-        workflow.placeholder = key === "kimage" ? "Paste the API-exported mandirImageKAPI.json contents here…" : "Not required for kVoice.";
+        workflow.placeholder = key === "kimage" ? "Paste the API-exported mandirImageKAPI.json contents here…" : "Not required for this provider.";
         workflow.value = saved.workflow_json || "";
         workflowLabel.appendChild(workflow);
         form.appendChild(workflowLabel);
@@ -747,7 +747,7 @@ async function renderProviderSettings(panel, project) {
         const save = document.createElement("button");
         save.type = "submit";
         save.className = "secondary-button";
-        save.textContent = "Save " + key.toUpperCase() + " settings";
+        save.textContent = "Save " + (key === "voice_studio" ? "Voice Studio" : key.toUpperCase()) + " settings";
         footer.append(status, save);
         form.appendChild(footer);
         form.addEventListener("submit", async event => {
@@ -780,7 +780,7 @@ async function renderProviderSettings(panel, project) {
                 keyLabel.firstChild.textContent = latest[key].api_key_configured
                     ? "API key (configured — leave blank to keep current key)"
                     : "API key";
-                apiKey.placeholder = latest[key].api_key_configured ? "Leave blank to keep saved key" : "Enter API key";
+                apiKey.placeholder = latest[key].api_key_configured ? "Leave blank to keep saved key" : key === "voice_studio" ? "Optional bearer key (if enabled)" : "Enter API key";
             } catch (error) {
                 status.textContent = error.message.includes("not available") ? error.message : error.message;
             } finally {
@@ -989,7 +989,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     const providerTitle = document.createElement("span");
     providerTitle.textContent = "Audio provider";
     const providerSelect = document.createElement("select");
-    for (const [value, labelText] of [["gemini", "Gemini API (Google TTS)"], ["voicebox", "Voicebox (local)"], ["kvoice", "kVoice (hosted API)"]]) {
+    for (const [value, labelText] of [["gemini", "Gemini API (Google TTS)"], ["voicebox", "Voicebox (local)"], ["kvoice", "kVoice (hosted API)"], ["voice_studio", "Voice Studio"]]) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = labelText;
@@ -1010,8 +1010,8 @@ async function renderAudioStage(workflow, project, audioStage) {
         }
     });
 
-    if (!available.length) {
-        setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
+    if (!available.length && selectedProvider !== "voicebox") {
+        setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voice Studio"} returned no available voice profiles.`);
         workflow.appendChild(panel);
         return;
     }
@@ -1030,8 +1030,9 @@ async function renderAudioStage(workflow, project, audioStage) {
     assignmentSection.className = "voice-assignment-list";
 
     const assignmentHeading = document.createElement("p");
-    assignmentHeading.textContent =
-        "Choose a separate voice profile for every character and for narration:";
+    assignmentHeading.textContent = selectedProvider === "voicebox"
+        ? "Voice profiles are optional for Voicebox. Leave a speaker unassigned to use the provider default."
+        : "Choose a separate voice profile for every character and for narration:";
 
     assignmentSection.appendChild(assignmentHeading);
 
@@ -1242,14 +1243,11 @@ async function renderAudioStage(workflow, project, audioStage) {
 
                 for (const [speakerId, select] of Object.entries(selectors)) {
                     if (!select.value) {
-                        setMessage(
-                            panel,
-                            `Please select a voice profile for ${speakerId}.`
-                        );
+                        if (providerSelect.value === "voicebox") continue;
+                        setMessage(panel, `Please select a voice profile for ${speakerId}.`);
                         select.focus();
                         return;
                     }
-
                     voiceAssignments[speakerId] = select.value;
                 }
 
