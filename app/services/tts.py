@@ -314,7 +314,7 @@ class VoiceStudioTTSProvider:
     async def synthesize_bytes(self, text: str, profile_id: str | None = None, language: str = "Hindi", engine: str = "") -> bytes:
         if not text or not text.strip(): raise ValueError("Cannot synthesize empty text.")
         models = await self.list_models()
-        model_id = engine or (str(models[0].get("id")) if models and isinstance(models[0], dict) else "tts-1")
+        model_id = (engine if engine and engine not in {"chatterbox", "chatterbox_turbo", "qwen", "qwen_custom_voice", "luxtts", "tada", "kokoro"} else None) or (str(models[0].get("id")) if models and isinstance(models[0], dict) else "tts-1")
         payload = {"model": model_id, "input": text.strip(), "voice": profile_id or "alloy", "response_format": "wav"}
         async with httpx.AsyncClient(timeout=httpx.Timeout(1800, connect=30)) as client:
             response = await client.post(f"{self.base_url}/v1/audio/speech", headers=self.headers, json=payload)
