@@ -23,6 +23,29 @@ class TTSProvider(ABC):
         raise NotImplementedError
 
 
+def _normalize_voice_catalog(data, provider: str) -> list[dict]:
+    """Accept common list and wrapped-list responses without dropping provider metadata."""
+    if isinstance(data, dict):
+        for key in ("voices", "profiles", "items", "data"):
+            candidate = data.get(key)
+            if isinstance(candidate, list):
+                data = candidate
+                break
+            if isinstance(candidate, dict):
+                for nested in ("voices", "profiles", "items"):
+                    if isinstance(candidate.get(nested), list):
+                        data = candidate[nested]
+                        break
+                if isinstance(data, list):
+                    break
+    if not isinstance(data, list):
+        raise RuntimeError(f"{provider} returned an unexpected voice catalogue response.")
+    return [
+        item if isinstance(item, dict) else {"id": str(item), "voice_id": str(item), "name": str(item)}
+        for item in data
+    ]
+
+
 class VoiceboxTTSProvider(TTSProvider):
     """Adapter for the local Voicebox REST API."""
 
@@ -35,9 +58,7 @@ class VoiceboxTTSProvider(TTSProvider):
             response = await client.get(f"{self.base_url}/profiles")
             response.raise_for_status()
             data = response.json()
-        if not isinstance(data, list):
-            raise RuntimeError("Voicebox /profiles returned an unexpected response.")
-        return data
+        return _normalize_voice_catalog(data, "Voicebox /profiles")
 
     @staticmethod
     def language_code(language: str) -> str:
@@ -170,13 +191,7 @@ class KVoiceTTSProvider:
             )
             response.raise_for_status()
             data = response.json()
-        if isinstance(data, list):
-            return [item if isinstance(item, dict) else {"id": str(item), "name": str(item)} for item in data]
-        if isinstance(data, dict):
-            voices = data.get("voices", data.get("items", []))
-            if isinstance(voices, list):
-                return [item if isinstance(item, dict) else {"id": str(item), "name": str(item)} for item in voices]
-        raise RuntimeError("kVoice /v1/voices returned an unexpected response.")
+        return _normalize_voice_catalog(data, "kVoice /v1/voices")
 
     async def synthesize_bytes(self, text: str, profile_id: str, language: str = "Hindi", engine: str = "") -> bytes:
         if not text or not text.strip():
@@ -302,9 +317,7 @@ class VoiceStudioTTSProvider:
 
     async def list_voices(self) -> list[dict]:
         data = await self._get_json("/v1/audio/voices")
-        if isinstance(data, dict): data = data.get("voices", data.get("items", []))
-        if not isinstance(data, list): raise RuntimeError("Voice Studio voices response is invalid.")
-        return [x if isinstance(x, dict) else {"id": str(x), "name": str(x)} for x in data]
+        return _normalize_voice_catalog(data, "Voice Studio /v1/audio/voices")
 
     async def list_models(self) -> list[dict]:
         data = await self._get_json("/v1/models")
