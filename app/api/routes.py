@@ -737,7 +737,7 @@ async def generate_project_audio(
         raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
 
     provider_settings = _project_provider_config(project)
-    audio_provider = str(getattr(payload, "provider", "voicebox") or "voicebox").lower()
+    audio_provider = str(getattr(payload, "provider", None) or json.loads(project.provider_config_json or "{}").get("audio_provider", "voicebox")).lower()
     if audio_provider == "kvoice":
         try:
             kvoice = KVoiceTTSProvider(provider_settings["kvoice"]["api_url"], provider_settings["kvoice"]["api_key"])
@@ -766,7 +766,7 @@ async def generate_project_audio(
         if profile_id not in profile_map
     })
     if invalid_profiles:
-        raise HTTPException(status_code=400, detail="One or more selected Voicebox profiles are unavailable.")
+        raise HTTPException(status_code=400, detail=f"One or more selected {'kVoice' if audio_provider == 'kvoice' else 'Voicebox'} profiles are unavailable.")
 
     project_path = Path(project.project_path)
     existing = read_manifest(project_path)
