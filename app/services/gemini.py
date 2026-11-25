@@ -110,7 +110,7 @@ class GeminiService:
             api_key=settings.gemini_api_key
         )
 
-        self.model = settings.gemini_text_model
+        self.model = ("gemini-3.8-flash" if settings.gemini_text_model == "gemini-2.5-flash" else settings.gemini_text_model)
         self.image_model = settings.gemini_image_model
 
     # ---------------------------------------------------------
