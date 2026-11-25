@@ -90,6 +90,59 @@ def _project_provider_config(project: Project) -> dict:
     return result
 
 
+@router.post("/projects/{project_id}/provider-settings/test")
+async def test_provider_server(project_id: int, request: Request, db: Session = Depends(get_db)):
+    """Check a provider endpoint before allowing its settings to be saved."""
+    get_project_or_404(project_id, db)
+    payload = await request.json()
+    provider = str(payload.get("provider") or "").strip().lower()
+    api_url = str(payload.get("api_url") or "").strip().rstrip("/")
+    api_key = str(payload.get("api_key") or "").strip()
+    if provider not in {"kimage", "kvoice"}:
+        raise HTTPException(status_code=400, detail="Choose kImage or kVoice to test.")
+    if not api_url:
+        raise HTTPException(status_code=400, detail="Enter the server API URL first.")
+    from urllib.parse import urlparse
+    parsed = urlparse(api_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Enter a valid API URL without embedded credentials.")
+    if parsed.scheme == "http" and parsed.hostname.lower() not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(status_code=400, detail="Use HTTPS for remote API servers.")
+    if provider == "kvoice" and not api_key:
+        # An existing saved key may be used when the key field is intentionally left blank.
+        try:
+            saved = json.loads(get_project_or_404(project_id, db).provider_config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            saved = {}
+        encrypted = (saved.get("kvoice") or {}).get("encrypted_api_key") or ""
+        api_key = decrypt_api_key(encrypted) if encrypted else ""
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Enter the kVoice API key before testing.")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    check_url = f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/voices"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0), follow_redirects=True) as client:
+            response = await client.get(check_url, headers=headers)
+        if response.status_code < 200 or response.status_code >= 300:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{provider} server is not available (HTTP {response.status_code} from its health endpoint).",
+            )
+        if provider == "kvoice":
+            data = response.json()
+            if not (isinstance(data, list) or isinstance(data, dict)):
+                raise ValueError("Unexpected kVoice voices response.")
+        return {"ok": True, "message": f"{provider} server is available."}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("%s server check failed for %s: %s", provider, api_url, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"{provider} server not available. Check the URL, API key, tunnel and server status.",
+        ) from exc
+
+
 @router.get("/projects/{project_id}/provider-settings")
 def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
