@@ -126,13 +126,48 @@ class KImageComfyAPI:
         if not save_nodes:
             raise RuntimeError("The kImage workflow has no SaveImage or PreviewImage output node.")
 
-        # The positive encoder is normally the first node and contains the
-        # non-empty prompt. Update it; retain the negative prompt unchanged.
+        # Select the positive prompt encoder explicitly. In the supplied
+        # Qwen workflow its title is "Prompt (positive)"; never infer this
+        # from whether a prompt field happens to be non-empty, because that
+        # can select a stale/template prompt or the wrong encoder.
         positive = next(
-            (node_id for node_id in encoders if workflow[node_id]["inputs"].get("prompt")),
-            encoders[0],
+            (
+                node_id for node_id in encoders
+                if "positive" in str(
+                    workflow[node_id].get("_meta", {}).get("title", "")
+                ).lower()
+            ),
+            None,
         )
-        workflow[positive]["inputs"]["prompt"] = prompt
+        if positive is None:
+            # Compatible fallback for API workflows without descriptive titles:
+            # select the encoder containing a non-empty prompt placeholder.
+            positive = next(
+                (
+                    node_id for node_id in encoders
+                    if str(workflow[node_id]["inputs"].get("prompt", "")).strip()
+                ),
+                None,
+            )
+        if positive is None:
+            raise RuntimeError(
+                "Could not identify the positive TextEncodeQwenImageEditPlus node. "
+                "Set its node title to include 'positive' in the ComfyUI workflow."
+            )
+
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("The scene image prompt is empty; refusing to submit a blank prompt.")
+
+        # Assign this request's prompt to the positive encoder on the fresh
+        # workflow copy. Keep the negative encoder (node 6 in the supplied
+        # workflow) unchanged.
+        workflow[positive]["inputs"]["prompt"] = prompt.strip()
+
+        logger_prompt = prompt.strip().replace("\\n", " ")
+        print(
+            f"[kImage] Positive prompt node={positive}; "
+            f"chars={len(prompt.strip())}; prompt={logger_prompt[:180]!r}"
+        )
 
         # Remove stale reference loader/stitch nodes from an exported workflow.
         # They are rebuilt from the exact references needed by this scene.
