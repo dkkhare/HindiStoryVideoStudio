@@ -627,9 +627,7 @@ async def generate_scene_images(
     db.commit()
 
     try:
-        provider_config = _project_provider_config(project)
-        service = ImageGenerationService(image_provider=json.loads(project.provider_config_json or "{}").get("image_provider", "gemini"),
-                                         kimage_config=provider_config["kimage"])
+        service = _project_image_generation_service(project)
 
         result = await service.generate_scene_images(
             project_path=project_path,
