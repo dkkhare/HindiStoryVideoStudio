@@ -977,12 +977,8 @@ async function renderAudioStage(workflow, project, audioStage) {
         kind: "narrator"
     });
 
-    const hindiProfiles = profiles.filter(profile =>
-        String(profile.language || profile.lang || "").toLowerCase() === "hi" ||
-        String(profile.language || profile.lang || "").toLowerCase() === "hindi"
-    );
-
-    const available = hindiProfiles.length ? hindiProfiles : profiles;
+    // Show the complete provider catalogue, including multilingual voices.
+    const available = Array.isArray(profiles) ? profiles : [];
 
     const providerLabel = document.createElement("label");
     providerLabel.className = "voice-assignment";
@@ -1109,6 +1105,74 @@ async function renderAudioStage(workflow, project, audioStage) {
     }
 
     panel.appendChild(assignmentSection);
+
+    const voiceTools = document.createElement("div");
+    voiceTools.className = "audio-controls";
+    const voiceStatus = document.createElement("p");
+    voiceStatus.className = "message";
+    voiceStatus.setAttribute("role", "status");
+    const checkVoicesButton = createButton("Check Server Availability", async button => {
+        button.disabled = true;
+        voiceStatus.textContent = "Checking selected audio provider…";
+        try {
+            await api(`/api/projects/${project.id}/provider-settings/test`, {
+                method: "POST",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({provider: providerSelect.value})
+            });
+            voiceStatus.textContent = "Server available.";
+        } catch (error) {
+            voiceStatus.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+    checkVoicesButton.className = "secondary";
+    const refreshVoicesButton = createButton("Refresh Voices", async button => {
+        button.disabled = true;
+        voiceStatus.textContent = "Refreshing complete voice catalogue…";
+        try {
+            const refreshed = await api(`/api/projects/${project.id}/audio/voices?provider=${encodeURIComponent(providerSelect.value)}`);
+            if (!Array.isArray(refreshed)) throw new Error("Provider returned an invalid voice list.");
+            voiceStatus.textContent = `Loaded ${refreshed.length} voices. Reopening Audio Production…`;
+            selectProject(project.id, "audio");
+        } catch (error) {
+            voiceStatus.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+    refreshVoicesButton.className = "secondary";
+    voiceTools.append(checkVoicesButton, refreshVoicesButton);
+    panel.append(voiceTools, voiceStatus);
+
+    for (const [speakerId, select] of Object.entries(selectors)) {
+        const registerButton = createButton(`Register voice for ${speakerId}`, async button => {
+            const selected = available.find(profile =>
+                String(profile.id || profile.voice_id || profile.name) === String(select.value)
+            );
+            if (!selected) {
+                voiceStatus.textContent = `Select a voice for ${speakerId} before registering it.`;
+                select.focus();
+                return;
+            }
+            button.disabled = true;
+            try {
+                const result = await api(`/api/projects/${project.id}/audio/voices/register`, {
+                    method: "POST",
+                    headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({provider: providerSelect.value, voice: selected})
+                });
+                voiceStatus.textContent = result.message || "Voice registered for this project.";
+            } catch (error) {
+                voiceStatus.textContent = error.message;
+            } finally {
+                button.disabled = false;
+            }
+        });
+        registerButton.className = "secondary";
+        assignmentSection.appendChild(registerButton);
+    }
 
     const status = manifest?.status || audioStage?.status || "pending";
     panel.dataset.audioStatus = status;
