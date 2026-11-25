@@ -241,8 +241,8 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
     audio_provider = str(payload.get("audio_provider", saved.get("audio_provider", "voicebox"))).lower()
     if image_provider not in {"gemini", "kimage"}:
         raise HTTPException(status_code=400, detail="Image provider must be Gemini or kImage.")
-    if audio_provider not in {"voicebox", "kvoice", "gemini"}:
-        raise HTTPException(status_code=400, detail="Audio provider must be Gemini API, Voicebox or kVoice.")
+    if audio_provider not in {"voicebox", "kvoice", "gemini", "voice_studio"}:
+        raise HTTPException(status_code=400, detail="Audio provider must be Gemini API, Voicebox, kVoice or Voice Studio.")
     saved["image_provider"] = image_provider
     saved["audio_provider"] = audio_provider
     project.provider_config_json = json.dumps(saved, ensure_ascii=False)
@@ -251,7 +251,7 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
         key: {"api_url": saved.get(key, {}).get("api_url", ""),
               "workflow_json": saved.get(key, {}).get("workflow_json", ""),
               "api_key_configured": bool(saved.get(key, {}).get("encrypted_api_key"))}
-        for key in ("kimage", "kvoice")
+        for key in ("kimage", "kvoice", "voice_studio")
     }}
 
 
