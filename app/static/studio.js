@@ -518,6 +518,44 @@ async function renderImagesView(panel, project, stages) {
         : "No image manifest has been created yet.";
     panel.appendChild(summary);
 
+    // Image provider is selectable directly in the Images stage.
+    let imageProviderSelect = null;
+    try {
+        const providerSettings = await api(`/api/projects/${project.id}/provider-settings`);
+        const providerPanel = document.createElement("section");
+        providerPanel.className = "panel";
+        providerPanel.style.marginBottom = "18px";
+        const providerLabel = document.createElement("label");
+        providerLabel.textContent = "Image generation provider";
+        imageProviderSelect = document.createElement("select");
+        imageProviderSelect.name = "image_provider";
+        for (const [value, caption] of [["gemini", "Gemini API"], ["kimage", "kImage — hosted ComfyUI / Kaggle"]]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = caption;
+            option.selected = (providerSettings.image_provider || "gemini") === value;
+            imageProviderSelect.appendChild(option);
+        }
+        providerLabel.appendChild(imageProviderSelect);
+        providerPanel.appendChild(providerLabel);
+        const providerHint = document.createElement("p");
+        providerHint.className = "message";
+        providerHint.textContent = "Choose the service for scene images. Configure the kImage API URL, key and mandirImageKAPI.json under API Settings.";
+        providerPanel.appendChild(providerHint);
+        panel.appendChild(providerPanel);
+    } catch (error) {
+        setMessage(panel, `Could not load image provider options: ${error.message}`);
+    }
+
+    const saveImageProvider = async () => {
+        if (!imageProviderSelect) throw new Error("Image provider selection is unavailable.");
+        await api(`/api/projects/${project.id}/provider-settings`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_provider: imageProviderSelect.value })
+        });
+    };
+
     if (refStatus !== "completed") {
         const button = createButton(
             refStatus === "running" ? "Generating references…" : "Generate character, prop & location references",
@@ -561,6 +599,7 @@ async function renderImagesView(panel, project, stages) {
             async btn => {
                 btn.disabled = true;
                 try {
+                    await saveImageProvider();
                     await api(`/api/projects/${project.id}/images/generate`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
