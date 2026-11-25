@@ -154,6 +154,58 @@ class VoiceboxTTSProvider(TTSProvider):
         return str(path)
 
 
+class KVoiceTTSProvider:
+    """Adapter for the hosted kVoive /v1/tts API used by F5PdfStudio."""
+
+    def __init__(self, api_url: str, api_key: str):
+        self.base_url = (api_url or "").rstrip("/")
+        self.api_key = api_key or ""
+        if not self.base_url or not self.api_key:
+            raise ValueError("Configure the kVoice API URL and API key in Project API Settings.")
+
+    async def list_voices(self) -> list[dict]:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(
+                f"{self.base_url}/v1/voices",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        if isinstance(data, list):
+            return [item if isinstance(item, dict) else {"id": str(item), "name": str(item)} for item in data]
+        if isinstance(data, dict):
+            voices = data.get("voices", data.get("items", []))
+            if isinstance(voices, list):
+                return [item if isinstance(item, dict) else {"id": str(item), "name": str(item)} for item in voices]
+        raise RuntimeError("kVoice /v1/voices returned an unexpected response.")
+
+    async def synthesize_bytes(self, text: str, profile_id: str, language: str = "Hindi", engine: str = "") -> bytes:
+        if not text or not text.strip():
+            raise ValueError("Cannot synthesize empty text.")
+        lang = (language or "Hindi").strip().lower()
+        lang = {"hindi": "hi", "english": "en"}.get(lang, lang)
+        payload = {
+            "text": text.strip(),
+            "voice": profile_id,
+            "language": lang,
+            "format": "wav",
+            "respect_lines": True,
+            "master": True,
+            "content_type": "auto",
+        }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(1800)) as client:
+            response = await client.post(
+                f"{self.base_url}/v1/tts",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=payload,
+            )
+            response.raise_for_status()
+            audio = response.content
+        if not audio.startswith(b"RIFF") or b"WAVE" not in audio[:16]:
+            raise RuntimeError("kVoice /v1/tts did not return a WAV file.")
+        return audio
+
+
 class GeminiTTSProvider(TTSProvider):
     async def synthesize(
         self, text: str, output_path: str, voice_id: str | None = None,
