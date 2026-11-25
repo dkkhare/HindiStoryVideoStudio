@@ -9,6 +9,7 @@ from google import genai
 
 from app.config import settings
 from app.services.gemini import GeminiService
+from app.services.kimage_comfy import KImageComfyAPI
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +96,11 @@ ASSET_BIBLE_SCHEMA = {
 
 class ImageGenerationService:
 
-    def __init__(self):
+    def __init__(self, image_provider: str = "gemini", kimage_config: dict | None = None):
         self.gemini = GeminiService()
+        self.image_provider = (image_provider or "gemini").lower()
+        self.kimage_config = kimage_config or {}
+        self.kimage = KImageComfyAPI(self.kimage_config.get("api_url", ""), self.kimage_config.get("api_key", ""), self.kimage_config.get("workflow_json", "")) if self.image_provider == "kimage" else None
 
         self.client = genai.Client(
             api_key=settings.gemini_api_key
@@ -827,6 +831,8 @@ SCENE DESCRIPTION:
 {prompt}
 """
         async with self.semaphore:
+            if self.image_provider == "kimage":
+                return await self.kimage.generate_image(prompt, output_path, reference_images, aspect_ratio, image_size)
             return await self.gemini.generate_image(
                 prompt=prompt,
                 output_path=output_path,
