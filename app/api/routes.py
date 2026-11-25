@@ -878,7 +878,14 @@ async def resume_project_audio(
         return {"ok": True, "status": "completed", "message": "All audio segments are already completed."}
 
     engine = manifest.get("engine") or settings.voicebox_engine
-    if not start_audio_worker(project_id, project_path, project.language, engine):
+    provider_name = str(manifest.get("provider") or "voicebox").lower()
+    saved_provider = _project_provider_config(project)
+    worker_config = {
+        "provider": provider_name,
+        "api_url": saved_provider["kvoice"]["api_url"] if provider_name == "kvoice" else "",
+        "api_key": saved_provider["kvoice"]["api_key"] if provider_name == "kvoice" else "",
+    }
+    if not start_audio_worker(project_id, project_path, project.language, engine, worker_config):
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
     return {
         "ok": True,
