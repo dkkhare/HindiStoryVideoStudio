@@ -36,6 +36,7 @@ class Project(Base):
     status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus), default=ProjectStatus.draft)
     project_path: Mapped[str] = mapped_column(String(500), nullable=False)
     screenplay_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     stages: Mapped[list["ProductionStage"]] = relationship(back_populates="project", cascade="all, delete-orphan")
