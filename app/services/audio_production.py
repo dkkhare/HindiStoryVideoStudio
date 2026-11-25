@@ -7,7 +7,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
-from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider, VoiceStudioTTSProvider
 
 logger = logging.getLogger(__name__)
 _TASKS: dict[int, asyncio.Task] = {}
@@ -162,6 +162,8 @@ async def _run_worker(
         )
     elif provider_name == "gemini":
         provider = GeminiTTSProvider()
+    elif provider_name == "voice_studio":
+        provider = VoiceStudioTTSProvider(provider_config.get("voice_studio_api_url", "http://127.0.0.1:3900"), provider_config.get("voice_studio_api_key", ""))
     else:
         provider = VoiceboxTTSProvider()
     segments = manifest.get("segments") or []
@@ -207,7 +209,7 @@ async def _run_worker(
                 manifest["completed"] = sum(x.get("status") == "completed" for x in segments)
                 write_manifest(project_path, manifest)
                 profile_id = assignment_map.get(item["speaker"])
-                if not profile_id:
+                if not profile_id and provider_name not in {"voicebox", "voice_studio"}:
                     raise ValueError(f"No voice profile assigned for speaker {item['speaker']}")
                 audio_bytes = await provider.synthesize_bytes(
                     text=item["text"],
