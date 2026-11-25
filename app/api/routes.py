@@ -863,10 +863,12 @@ async def generate_project_audio(
             raise HTTPException(status_code=503, detail=f"Cannot connect to Voice Studio: {exc}") from exc
     else:
         audio_provider = "voicebox"
+        # Voicebox profiles are optional; the provider may use its configured default voice.
         try:
             profiles = await VoiceboxTTSProvider().list_profiles()
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}") from exc
+        except Exception:
+            logger.info("Voicebox profile listing unavailable; continuing with provider defaults.")
+            profiles = []
 
     speakers = required_speakers(screenplay)
     required_ids = [item["id"] for item in speakers]
