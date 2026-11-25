@@ -156,7 +156,8 @@ const PROJECT_SECTIONS = [
     ["images", "Images", "▧"],
     ["audio", "Audio", "♫"],
     ["video-clips", "Video Clips", "▶"],
-    ["story-video", "Story Video", "▣"]
+    ["story-video", "Story Video", "▣"],
+    ["provider-settings", "API Settings", "⚙"]
 ];
 
 function setPage(page, label) {
@@ -362,6 +363,8 @@ async function renderSelectedProjectView() {
             await renderVideoStage(panel, project, stages.video);
         } else if (activeProjectSection === "story-video") {
             await renderStoryVideoView(panel, project);
+        } else if (activeProjectSection === "provider-settings") {
+            await renderProviderSettings(panel, project);
         }
     } catch (error) {
         setMessage(panel, `Could not load this project section: ${error.message}`);
@@ -581,6 +584,107 @@ async function renderImagesView(panel, project, stages) {
         grid.className = "image-asset-grid";
         sceneRecords.forEach(([id, record]) => addImageAssetCard(grid, project.id, id, record));
         panel.appendChild(grid);
+    }
+}
+
+async function renderProviderSettings(panel, project) {
+    const intro = document.createElement("p");
+    intro.className = "message";
+    intro.textContent = "Enter the API endpoint, API key and exported ComfyUI API workflow for each provider. Credentials are encrypted in the project database. These settings are saved here for configuration; they do not change the current image or audio generation pipeline.";
+    panel.appendChild(intro);
+    let settings;
+    try {
+        settings = await api(`/api/projects/${project.id}/provider-settings`);
+    } catch (error) {
+        setMessage(panel, error.message);
+        return;
+    }
+
+    for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"]]) {
+        const saved = settings[key] || {};
+        const card = document.createElement("section");
+        card.className = "panel";
+        card.style.marginBottom = "20px";
+        const heading = document.createElement("h3");
+        heading.textContent = title;
+        card.appendChild(heading);
+        const form = document.createElement("form");
+        form.className = "worker-form";
+        const urlLabel = document.createElement("label");
+        urlLabel.textContent = "API URL";
+        const url = document.createElement("input");
+        url.type = "url";
+        url.name = "api_url";
+        url.required = false;
+        url.placeholder = "https://your-comfyui-endpoint.example";
+        url.value = saved.api_url || "";
+        urlLabel.appendChild(url);
+        form.appendChild(urlLabel);
+
+        const keyLabel = document.createElement("label");
+        keyLabel.textContent = saved.api_key_configured ? "API key (configured — leave blank to keep current key)" : "API key";
+        const apiKey = document.createElement("input");
+        apiKey.type = "password";
+        apiKey.name = "api_key";
+        apiKey.autocomplete = "new-password";
+        apiKey.placeholder = saved.api_key_configured ? "Leave blank to keep saved key" : "Enter API key";
+        keyLabel.appendChild(apiKey);
+        form.appendChild(keyLabel);
+
+        const workflowLabel = document.createElement("label");
+        workflowLabel.textContent = "ComfyUI workflow JSON (Workflow → Export → API)";
+        const workflow = document.createElement("textarea");
+        workflow.name = "workflow_json";
+        workflow.rows = 14;
+        workflow.spellcheck = false;
+        workflow.placeholder = '{"1":{"class_type":"...","inputs":{}}}';
+        workflow.value = saved.workflow_json || "";
+        workflowLabel.appendChild(workflow);
+        form.appendChild(workflowLabel);
+
+        const footer = document.createElement("div");
+        footer.className = "worker-form-footer";
+        const status = document.createElement("p");
+        status.className = "message";
+        status.setAttribute("role", "status");
+        const save = document.createElement("button");
+        save.type = "submit";
+        save.className = "secondary-button";
+        save.textContent = "Save " + key.toUpperCase() + " settings";
+        footer.append(status, save);
+        form.appendChild(footer);
+        form.addEventListener("submit", async event => {
+            event.preventDefault();
+            save.disabled = true;
+            status.textContent = "Saving…";
+            const body = {
+                [key]: {
+                    api_url: url.value.trim(),
+                    api_key: apiKey.value,
+                    workflow_json: workflow.value
+                }
+            };
+            try {
+                await api(`/api/projects/${project.id}/provider-settings`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                apiKey.value = "";
+                status.textContent = "Settings saved.";
+                const latest = await api(`/api/projects/${project.id}/provider-settings`);
+                keyLabel.firstChild.textContent = latest[key].api_key_configured
+                    ? "API key (configured — leave blank to keep current key)"
+                    : "API key";
+                apiKey.placeholder = latest[key].api_key_configured ? "Leave blank to keep saved key" : "Enter API key";
+            } catch (error) {
+                status.textContent = error.message;
+            } finally {
+                save.disabled = false;
+            }
+        });
+        card.appendChild(form);
+        panel.appendChild(card);
     }
 }
 
