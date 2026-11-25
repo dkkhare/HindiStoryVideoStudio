@@ -191,7 +191,7 @@ class KVoiceTTSProvider:
             "format": "wav",
             "respect_lines": True,
             "master": True,
-            "content_type": "auto",
+            "content_type": None,
         }
         async with httpx.AsyncClient(timeout=httpx.Timeout(1800)) as client:
             response = await client.post(
