@@ -100,6 +100,16 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
     provider = str(payload.get("provider") or "").strip().lower()
     api_url = str(payload.get("api_url") or "").strip().rstrip("/")
     api_key = str(payload.get("api_key") or "").strip()
+    if provider in {"kvoice", "voice_studio"} and (not api_url or not api_key):
+        try:
+            saved_config = json.loads(get_project_or_404(project_id, db).provider_config_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            saved_config = {}
+        provider_saved = saved_config.get(provider) or {}
+        api_url = api_url or str(provider_saved.get("api_url") or "").strip().rstrip("/")
+        if not api_key:
+            encrypted_key = provider_saved.get("encrypted_api_key") or ""
+            api_key = decrypt_api_key(encrypted_key) if encrypted_key else ""
     if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini"}:
         raise HTTPException(status_code=400, detail="Choose a supported image or audio provider to test.")
     if provider == "gemini":
