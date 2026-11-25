@@ -775,6 +775,7 @@ async def generate_project_audio(
         raise HTTPException(status_code=400, detail="The screenplay has no non-empty dialogue or narration segments.")
     same_queue = bool(
         existing
+        and str(existing.get("provider") or "voicebox").lower() == audio_provider
         and [
             (x.get("scene_id"), x.get("segment_id"), x.get("speaker"), x.get("text"))
             for x in existing.get("segments", [])
