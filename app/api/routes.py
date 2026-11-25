@@ -46,6 +46,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+def _project_image_generation_service(project: Project) -> ImageGenerationService:
+    """Build the shared image service from this project's saved provider choice."""
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    provider = str(saved.get("image_provider") or "gemini").strip().lower()
+    if provider not in {"gemini", "kimage"}:
+        raise HTTPException(status_code=400, detail="Saved image provider must be Gemini or kImage.")
+    config = _project_provider_config(project).get("kimage", {})
+    return ImageGenerationService(image_provider=provider, kimage_config=config)
+
+
 def _project_provider_config(project: Project) -> dict:
     try:
         saved = json.loads(project.provider_config_json or "{}")
@@ -530,9 +543,7 @@ async def generate_references(
     db.commit()
 
     try:
-        provider_config = _project_provider_config(project)
-        service = ImageGenerationService(image_provider=json.loads(project.provider_config_json or "{}").get("image_provider", "gemini"),
-                                         kimage_config=provider_config["kimage"])
+        service = _project_image_generation_service(project)
 
         result = await service.generate_references(
             project_path=project_path,
@@ -654,7 +665,7 @@ def get_image_status(
 ):
     project = get_project_or_404(project_id, db)
 
-    service = ImageGenerationService()
+    service = _project_image_generation_service(project)
     status = service.get_image_status(Path(project.project_path))
 
     return {
