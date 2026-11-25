@@ -23,7 +23,7 @@ from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGene
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
-from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider
 from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
 from app.services.video_production import (
     read_manifest as read_video_manifest,
@@ -218,8 +218,8 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
     audio_provider = str(payload.get("audio_provider", saved.get("audio_provider", "voicebox"))).lower()
     if image_provider not in {"gemini", "kimage"}:
         raise HTTPException(status_code=400, detail="Image provider must be Gemini or kImage.")
-    if audio_provider not in {"voicebox", "kvoice"}:
-        raise HTTPException(status_code=400, detail="Audio provider must be Voicebox or kVoice.")
+    if audio_provider not in {"voicebox", "kvoice", "gemini"}:
+        raise HTTPException(status_code=400, detail="Audio provider must be Gemini API, Voicebox or kVoice.")
     saved["image_provider"] = image_provider
     saved["audio_provider"] = audio_provider
     project.provider_config_json = json.dumps(saved, ensure_ascii=False)
@@ -781,6 +781,12 @@ def get_project_asset(
 @router.get("/projects/{project_id}/audio/voices")
 async def list_project_audio_voices(project_id: int, provider: str = "voicebox", db: Session = Depends(get_db)):
     project = get_project_or_404(project_id, db)
+    if provider == "gemini":
+        try:
+            GeminiTTSProvider()
+            return await GeminiTTSProvider.list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Could not load Gemini TTS voices: {exc}") from exc
     if provider == "kvoice":
         config = _project_provider_config(project)["kvoice"]
         try:
@@ -829,8 +835,15 @@ async def generate_project_audio(
         raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
 
     provider_settings = _project_provider_config(project)
-    audio_provider = str(getattr(payload, "provider", None) or json.loads(project.provider_config_json or "{}").get("audio_provider", "voicebox")).lower()
-    if audio_provider == "kvoice":
+    saved_config = json.loads(project.provider_config_json or "{}")
+    audio_provider = str(getattr(payload, "provider", None) or saved_config.get("audio_provider", "voicebox")).lower()
+    if audio_provider == "gemini":
+        try:
+            GeminiTTSProvider()
+            profiles = await GeminiTTSProvider.list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Cannot connect to Gemini TTS: {exc}") from exc
+    elif audio_provider == "kvoice":
         try:
             kvoice = KVoiceTTSProvider(provider_settings["kvoice"]["api_url"], provider_settings["kvoice"]["api_key"])
             profiles = await kvoice.list_voices()
@@ -858,7 +871,7 @@ async def generate_project_audio(
         if profile_id not in profile_map
     })
     if invalid_profiles:
-        raise HTTPException(status_code=400, detail=f"One or more selected {'kVoice' if audio_provider == 'kvoice' else 'Voicebox'} profiles are unavailable.")
+        raise HTTPException(status_code=400, detail=f"One or more selected {audio_provider} voice profiles are unavailable.")
 
     project_path = Path(project.project_path)
     existing = read_manifest(project_path)
@@ -894,7 +907,7 @@ async def generate_project_audio(
                 item.pop("error", None)
     else:
         manifest = {
-            "provider": "voicebox",
+            "provider": audio_provider,
             "segments": new_segments,
             "scenes": [],
             "completed": 0,
