@@ -24,7 +24,7 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
-from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
+from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
