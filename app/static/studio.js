@@ -762,20 +762,27 @@ async function renderProviderSettings(panel, project) {
                 }
             };
             try {
+                status.textContent = "Checking server availability…";
+                await api(`/api/projects/${project.id}/provider-settings/test`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ provider: key, api_url: body[key].api_url, api_key: body[key].api_key })
+                });
+                status.textContent = "Server available. Saving settings…";
                 await api(`/api/projects/${project.id}/provider-settings`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body)
                 });
                 apiKey.value = "";
-                status.textContent = "Settings saved.";
+                status.textContent = "Server available. Settings saved.";
                 const latest = await api(`/api/projects/${project.id}/provider-settings`);
                 keyLabel.firstChild.textContent = latest[key].api_key_configured
                     ? "API key (configured — leave blank to keep current key)"
                     : "API key";
                 apiKey.placeholder = latest[key].api_key_configured ? "Leave blank to keep saved key" : "Enter API key";
             } catch (error) {
-                status.textContent = error.message;
+                status.textContent = error.message.includes("not available") ? error.message : error.message;
             } finally {
                 save.disabled = false;
             }
