@@ -100,8 +100,8 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
     provider = str(payload.get("provider") or "").strip().lower()
     api_url = str(payload.get("api_url") or "").strip().rstrip("/")
     api_key = str(payload.get("api_key") or "").strip()
-    if provider not in {"kimage", "kvoice", "voice_studio"}:
-        raise HTTPException(status_code=400, detail="Choose kImage, kVoice or Voice Studio to test.")
+    if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini"}:
+        raise HTTPException(status_code=400, detail="Choose a supported image or audio provider to test.")
     if not api_url:
         raise HTTPException(status_code=400, detail="Enter the server API URL first.")
     from urllib.parse import urlparse
@@ -121,7 +121,18 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
         if not api_key:
             raise HTTPException(status_code=400, detail="Enter the kVoice API key before testing.")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    check_url = (f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
+    if provider == "voicebox":
+        api_url = (api_url or settings.voicebox_base_url).rstrip("/")
+        check_url = f"{api_url}/health"
+    elif provider == "gemini":
+        try:
+            GeminiTTSProvider()
+            await GeminiTTSProvider.list_voices()
+            return {"ok": True, "message": "Gemini TTS is available and its voice catalogue loaded."}
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Gemini TTS is unavailable: {exc}") from exc
+    else:
+        check_url = (f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0), follow_redirects=True) as client:
             response = await client.get(check_url, headers=headers)
@@ -803,6 +814,50 @@ async def list_project_audio_voices(project_id: int, provider: str = "voicebox",
         return await VoiceboxTTSProvider().list_profiles()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Could not load Voicebox profiles: {exc}") from exc
+
+
+@router.post("/projects/{project_id}/audio/voices/register")
+async def register_project_audio_voice(project_id: int, request: Request, db: Session = Depends(get_db)):
+    """Persist a selected server voice in this project's reusable voice registry."""
+    project = get_project_or_404(project_id, db)
+    payload = await request.json()
+    provider = str(payload.get("provider") or "").strip().lower()
+    voice = payload.get("voice")
+    if provider not in {"gemini", "voicebox", "kvoice", "voice_studio"}:
+        raise HTTPException(status_code=400, detail="Unsupported audio provider.")
+    if not isinstance(voice, dict):
+        raise HTTPException(status_code=400, detail="Select a voice before registering it.")
+    voice_id = str(voice.get("id") or voice.get("voice_id") or voice.get("name") or "").strip()
+    if not voice_id:
+        raise HTTPException(status_code=400, detail="The selected voice has no ID or name.")
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    registry = saved.setdefault("registered_voices", {})
+    provider_voices = registry.setdefault(provider, [])
+    normalized = {
+        "id": voice_id,
+        "name": str(voice.get("name") or voice.get("display_name") or voice_id),
+        "language": str(voice.get("language") or voice.get("lang") or ""),
+        "provider": provider,
+        "voice": voice,
+    }
+    provider_voices[:] = [item for item in provider_voices if str(item.get("id")) != voice_id]
+    provider_voices.append(normalized)
+    project.provider_config_json = json.dumps(saved, ensure_ascii=False)
+    db.commit()
+    return {"ok": True, "message": f"Registered {normalized['name']} for this project.", "voice": normalized}
+
+
+@router.get("/projects/{project_id}/audio/voices/registered")
+def get_registered_project_audio_voices(project_id: int, provider: str, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    return (saved.get("registered_voices") or {}).get(provider, [])
 
 
 @router.get("/projects/{project_id}/audio/models")
