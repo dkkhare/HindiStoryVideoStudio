@@ -1253,34 +1253,39 @@ SCENE DESCRIPTION:
                 prop_ids = mapping.get("prop_ids", [])
                 location_ids = mapping.get("location_ids", [])
 
+                # Collect every reference required by this scene. The
+                # kImage provider packs an open-ended list into Qwen's three
+                # reference sockets; Gemini receives the same complete list.
                 reference_paths = []
+                required_assets = []
+                required_assets.extend(
+                    ("characters", asset_id) for asset_id in character_ids
+                )
+                required_assets.extend(
+                    ("props", asset_id) for asset_id in prop_ids
+                )
+                required_assets.extend(
+                    ("locations", asset_id) for asset_id in location_ids
+                )
 
-                # Model supports up to 4 character references
-                # and 10 object references in this workflow.
-                for character_id in character_ids[:4]:
-
-                    record_ref = references.get(
-                        "characters", {}
-                    ).get(character_id)
-
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
+                seen_reference_paths = set()
+                for group_name, asset_id in required_assets:
+                    record_ref = references.get(group_name, {}).get(asset_id)
+                    if not record_ref or not record_ref.get("path"):
+                        raise RuntimeError(
+                            f"Scene {scene_id} requires reference {asset_id}, "
+                            f"but its {group_name} reference is missing from the image manifest."
                         )
-
-                object_ids = prop_ids + location_ids
-
-                for asset_id in object_ids[:10]:
-
-                    record_ref = (
-                        references.get("props", {}).get(asset_id)
-                        or references.get("locations", {}).get(asset_id)
-                    )
-
-                    if record_ref:
-                        reference_paths.append(
-                            project_path / record_ref["path"]
+                    reference_path = project_path / record_ref["path"]
+                    if not self.valid_image(reference_path):
+                        raise RuntimeError(
+                            f"Scene {scene_id} requires reference image {asset_id}, "
+                            f"but the file is missing or invalid: {reference_path}"
                         )
+                    normalized_path = str(reference_path.resolve()).casefold()
+                    if normalized_path not in seen_reference_paths:
+                        seen_reference_paths.add(normalized_path)
+                        reference_paths.append(reference_path)
 
                 prompt = self.scene_image_prompt(
                     scene,
