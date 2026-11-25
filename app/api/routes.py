@@ -504,6 +504,7 @@ def approve_screenplay(
 @router.post("/projects/{project_id}/references/generate")
 async def generate_references(
     project_id: int,
+    force_regenerate: bool = False,
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
@@ -550,6 +551,7 @@ async def generate_references(
             screenplay=screenplay,
             visual_style=project.visual_style,
             aspect_ratio=project.aspect_ratio,
+            force_regenerate=force_regenerate,
         )
 
         reference_stage.status = StageStatus.completed
@@ -578,6 +580,7 @@ async def generate_references(
 @router.post("/projects/{project_id}/images/generate")
 async def generate_scene_images(
     project_id: int,
+    force_regenerate: bool = False,
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
@@ -633,6 +636,7 @@ async def generate_scene_images(
             screenplay=screenplay,
             aspect_ratio=project.aspect_ratio,
             visual_style=project.visual_style,
+            force_regenerate=force_regenerate,
         )
 
         scene_stage.status = StageStatus.completed
