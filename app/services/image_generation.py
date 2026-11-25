@@ -953,6 +953,7 @@ SCENE DESCRIPTION:
 
                 if (
                     not force_regenerate
+                    and record.get("provider") == self.image_provider
                     and self.valid_image(output_path)
                 ):
                     record["status"] = "completed"
@@ -982,7 +983,8 @@ SCENE DESCRIPTION:
                         "path": self.relative_path(
                             project_path, output_path
                         ),
-                        "model": result["model"]
+                        "model": result["model"],
+                        "provider": self.image_provider
                     })
 
                 except Exception as exc:
