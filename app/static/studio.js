@@ -556,16 +556,22 @@ async function renderImagesView(panel, project, stages) {
         });
     };
 
-    if (refStatus !== "completed") {
+    {
+        const alreadyGenerated = refStatus === "completed";
         const button = createButton(
-            refStatus === "running" ? "Generating references…" : "Generate character, prop & location references",
+            refStatus === "running"
+                ? "Generating references…"
+                : alreadyGenerated
+                    ? "Regenerate character, prop & location references"
+                    : "Generate character, prop & location references",
             async btn => {
                 btn.disabled = true;
                 try {
                     // Persist the current choice before the reference endpoint
                     // reads the project provider configuration.
                     await saveImageProvider();
-                    await api(`/api/projects/${project.id}/references/generate`, { method: "POST" });
+                    const force = alreadyGenerated ? "?force_regenerate=true" : "";
+                    await api(`/api/projects/${project.id}/references/generate${force}`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
                     btn.disabled = false;
@@ -596,14 +602,20 @@ async function renderImagesView(panel, project, stages) {
         panel.appendChild(grid);
     }
 
-    if (refStatus === "completed" && sceneStatus !== "completed") {
+    if (refStatus === "completed") {
+        const alreadyGenerated = sceneStatus === "completed";
         const button = createButton(
-            sceneStatus === "running" ? "Generating scene images…" : "Generate scene images",
+            sceneStatus === "running"
+                ? "Generating scene images…"
+                : alreadyGenerated
+                    ? "Regenerate scene images"
+                    : "Generate scene images",
             async btn => {
                 btn.disabled = true;
                 try {
                     await saveImageProvider();
-                    await api(`/api/projects/${project.id}/images/generate`, { method: "POST" });
+                    const force = alreadyGenerated ? "?force_regenerate=true" : "";
+                    await api(`/api/projects/${project.id}/images/generate${force}`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
                     btn.disabled = false;
