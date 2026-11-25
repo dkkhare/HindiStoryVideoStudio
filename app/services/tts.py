@@ -311,6 +311,11 @@ class VoiceStudioTTSProvider:
         if isinstance(data, dict): data = data.get("data", data.get("models", []))
         return data if isinstance(data, list) else []
 
+    async def get_model(self, model_id: str) -> dict:
+        from urllib.parse import quote
+        data = await self._get_json(f"/v1/models/{quote(model_id, safe='')}")
+        return data if isinstance(data, dict) else {"data": data}
+
     async def synthesize_bytes(self, text: str, profile_id: str | None = None, language: str = "Hindi", engine: str = "") -> bytes:
         if not text or not text.strip(): raise ValueError("Cannot synthesize empty text.")
         models = await self.list_models()
