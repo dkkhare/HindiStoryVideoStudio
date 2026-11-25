@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+_ACTIVE_SCENE_IMAGE_GENERATIONS: set[int] = set()
+
 def _project_image_generation_service(
     project: Project,
     requested_provider: str | None = None,
@@ -693,6 +695,7 @@ async def generate_scene_images(
     scene_stage.status = StageStatus.running
     scene_stage.detail = "Generating scene images..."
     db.commit()
+    _ACTIVE_SCENE_IMAGE_GENERATIONS.add(project_id)
 
     try:
         service = _project_image_generation_service(project, image_provider)
@@ -726,6 +729,8 @@ async def generate_scene_images(
             status_code=502,
             detail=f"Scene image generation failed: {exc}",
         ) from exc
+    finally:
+        _ACTIVE_SCENE_IMAGE_GENERATIONS.discard(project_id)
 
 
 @router.get("/projects/{project_id}/images/status")
@@ -734,6 +739,12 @@ def get_image_status(
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
+
+    stage = get_stage(project, "scene_images")
+    if stage and stage.status == StageStatus.running and project_id not in _ACTIVE_SCENE_IMAGE_GENERATIONS:
+        stage.status = StageStatus.failed
+        stage.detail = "Previous scene-image generation was interrupted. Click Generate scene images to continue."
+        db.commit()
 
     service = _project_image_generation_service(project)
     status = service.get_image_status(Path(project.project_path))
