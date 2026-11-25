@@ -23,8 +23,8 @@ from app.schemas import ProjectCreate, ProjectOut, ScreenplayResponse, AudioGene
 from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
-from app.services.tts import VoiceboxTTSProvider
-from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider
+from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
@@ -45,6 +45,24 @@ from app.services.audio_production import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+def _project_provider_config(project: Project) -> dict:
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        saved = {}
+    result = {}
+    for name in ("kimage", "kvoice"):
+        item = saved.get(name) or {}
+        encrypted = item.get("encrypted_api_key") or ""
+        key = decrypt_api_key(encrypted) if encrypted else ""
+        result[name] = {
+            "api_url": item.get("api_url", ""),
+            "workflow_json": item.get("workflow_json", ""),
+            "api_key": key,
+        }
+    return result
+
 
 @router.get("/projects/{project_id}/provider-settings")
 def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
@@ -502,7 +520,9 @@ async def generate_references(
     db.commit()
 
     try:
-        service = ImageGenerationService()
+        provider_config = _project_provider_config(project)
+        service = ImageGenerationService(image_provider="kimage" if provider_config["kimage"]["api_url"] and provider_config["kimage"]["workflow_json"] else "gemini",
+                                         kimage_config=provider_config["kimage"])
 
         result = await service.generate_references(
             project_path=project_path,
@@ -583,7 +603,9 @@ async def generate_scene_images(
     db.commit()
 
     try:
-        service = ImageGenerationService()
+        provider_config = _project_provider_config(project)
+        service = ImageGenerationService(image_provider="kimage" if provider_config["kimage"]["api_url"] and provider_config["kimage"]["workflow_json"] else "gemini",
+                                         kimage_config=provider_config["kimage"])
 
         result = await service.generate_scene_images(
             project_path=project_path,
@@ -689,14 +711,20 @@ async def generate_project_audio(
     if not scenes:
         raise HTTPException(status_code=400, detail="The screenplay contains no scenes.")
 
-    voicebox = VoiceboxTTSProvider()
-    try:
-        profiles = await voicebox.list_profiles()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}",
-        ) from exc
+    provider_settings = _project_provider_config(project)
+    audio_provider = str(getattr(payload, "provider", "voicebox") or "voicebox").lower()
+    if audio_provider == "kvoice":
+        try:
+            kvoice = KVoiceTTSProvider(provider_settings["kvoice"]["api_url"], provider_settings["kvoice"]["api_key"])
+            profiles = await kvoice.list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Cannot connect to configured kVoice API: {exc}") from exc
+    else:
+        audio_provider = "voicebox"
+        try:
+            profiles = await VoiceboxTTSProvider().list_profiles()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Cannot connect to Voicebox at {settings.voicebox_base_url}: {exc}") from exc
 
     speakers = required_speakers(screenplay)
     required_ids = [item["id"] for item in speakers]
@@ -707,7 +735,7 @@ async def generate_project_audio(
             detail="Select a voice profile for every character and the narrator: " + ", ".join(missing),
         )
 
-    profile_map = {str(item.get("id")): item for item in profiles}
+    profile_map = {str(item.get("id") or item.get("voice_id") or item.get("name")): item for item in profiles}
     invalid_profiles = sorted({
         profile_id for profile_id in payload.voice_assignments.values()
         if profile_id not in profile_map
@@ -774,7 +802,14 @@ async def generate_project_audio(
     manifest["detail"] = "Audio generation queued."
     write_manifest(project_path, manifest)
 
-    if not start_audio_worker(project_id, project_path, project.language, payload.engine):
+    manifest["provider"] = audio_provider
+    write_manifest(project_path, manifest)
+    worker_config = {
+        "provider": audio_provider,
+        "api_url": provider_settings["kvoice"]["api_url"] if audio_provider == "kvoice" else "",
+        "api_key": provider_settings["kvoice"]["api_key"] if audio_provider == "kvoice" else "",
+    }
+    if not start_audio_worker(project_id, project_path, project.language, payload.engine, worker_config):
         raise HTTPException(status_code=409, detail="Audio generation is already running.")
     return {
         "ok": True,
