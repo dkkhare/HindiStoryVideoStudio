@@ -1010,6 +1010,32 @@ async function renderAudioStage(workflow, project, audioStage) {
         }
     });
 
+    let modelSelect = null;
+    if (selectedProvider === "voice_studio") {
+        try {
+            const models = await api(`/api/projects/${project.id}/audio/models?provider=voice_studio`);
+            if (Array.isArray(models) && models.length) {
+                const modelLabel = document.createElement("label");
+                modelLabel.className = "voice-assignment";
+                const modelTitle = document.createElement("span");
+                modelTitle.textContent = "Voice Studio model";
+                modelSelect = document.createElement("select");
+                for (const model of models) {
+                    const id = model.id || model.name;
+                    if (!id) continue;
+                    const option = document.createElement("option");
+                    option.value = id;
+                    option.textContent = model.name ? `${model.name} · ${id}` : id;
+                    modelSelect.appendChild(option);
+                }
+                modelLabel.append(modelTitle, modelSelect);
+                panel.appendChild(modelLabel);
+            }
+        } catch (error) {
+            setMessage(panel, `Could not load Voice Studio models: ${error.message}`);
+        }
+    }
+
     if (!available.length && selectedProvider !== "voicebox") {
         setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voice Studio"} returned no available voice profiles.`);
         workflow.appendChild(panel);
@@ -1262,7 +1288,7 @@ async function renderAudioStage(workflow, project, audioStage) {
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                                 voice_assignments: voiceAssignments,
-                                engine: "chatterbox",
+                                engine: providerSelect.value === "voice_studio" ? (modelSelect?.value || "") : "chatterbox",
                                 provider: providerSelect.value
                             })
                         }
