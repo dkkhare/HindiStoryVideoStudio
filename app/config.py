@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_text_model: str = "gemini-3.8-flash"
     gemini_image_model: str = "gemini-3.1-flash-image"
-    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    gemini_tts_model: str = "gemini-3.8-flash-tts"
 
     comfyui_client_id: str = "hindi-story-studio"
     comfyui_request_timeout_seconds: int = 2700
