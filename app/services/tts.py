@@ -207,13 +207,92 @@ class KVoiceTTSProvider:
 
 
 class GeminiTTSProvider(TTSProvider):
+    """Gemini API text-to-speech adapter using the project's Gemini API key."""
+
+    VOICES = [
+        "Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede",
+        "Autonoe", "Callirrhoe", "Charon", "Despina", "Enceladus",
+        "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia",
+        "Leda", "Orus", "Puck", "Pulcherrima", "Rasalgethi", "Sadachbia",
+        "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix",
+        "Zephyr", "Zubenelgenubi",
+    ]
+
+    def __init__(self):
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured in .env")
+        from google import genai
+        self.client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options={"api_version": "v1beta"},
+        )
+        self.model = settings.gemini_tts_model or "gemini-3.8-flash-tts"
+
+    @classmethod
+    async def list_voices(cls) -> list[dict]:
+        return [
+            {"id": voice, "voice_id": voice, "name": voice, "language": "Hindi"}
+            for voice in cls.VOICES
+        ]
+
+    async def synthesize_bytes(
+        self, text: str, profile_id: str, language: str = "Hindi", engine: str = "",
+    ) -> bytes:
+        if not text or not text.strip():
+            raise ValueError("Cannot synthesize empty text.")
+        if profile_id not in self.VOICES:
+            raise ValueError(f"Unsupported Gemini TTS voice: {profile_id}")
+        from google.genai import types
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
+            model=self.model,
+            contents=[{
+                "role": "user",
+                "parts": [{
+                    "text": text.strip(),
+                    "speech_metadata": {"style": engine} if engine else {},
+                }],
+            }],
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    language_code=self._language_code(language),
+                    voice_config=types.VoiceConfig(
+                        voice=profile_id,
+                    ),
+                ),
+            ),
+        )
+        for candidate in (getattr(response, "candidates", None) or []):
+            content = getattr(candidate, "content", None)
+            for part in (getattr(content, "parts", None) or []):
+                inline = getattr(part, "inline_data", None)
+                data = getattr(inline, "data", None) if inline else None
+                if data:
+                    audio = bytes(data)
+                    if audio.startswith(b"RIFF") and b"WAVE" in audio[:16]:
+                        return audio
+        raise RuntimeError("Gemini TTS returned no WAV audio data.")
+
+    @staticmethod
+    def _language_code(language: str) -> str:
+        value = (language or "Hindi").strip().lower()
+        return {
+            "hindi": "hi-IN", "english": "en-US", "tamil": "ta-IN",
+            "telugu": "te-IN", "bengali": "bn-IN", "marathi": "mr-IN",
+            "gujarati": "gu-IN", "kannada": "kn-IN", "malayalam": "ml-IN",
+            "punjabi": "pa-IN", "urdu": "ur-IN",
+        }.get(value, value if "-" in value else "hi-IN")
+
     async def synthesize(
         self, text: str, output_path: str, voice_id: str | None = None,
         reference_audio: str | None = None, reference_text: str | None = None,
     ) -> str:
-        raise NotImplementedError(
-            "Gemini TTS audio adapter is not implemented yet."
-        )
+        audio = await self.synthesize_bytes(text, voice_id or "Kore")
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(audio)
+        return str(path)
 
 
 class F5TTSProvider(TTSProvider):
