@@ -570,8 +570,9 @@ async function renderImagesView(panel, project, stages) {
                     // Persist the current choice before the reference endpoint
                     // reads the project provider configuration.
                     await saveImageProvider();
-                    const force = alreadyGenerated ? "?force_regenerate=true" : "";
-                    await api(`/api/projects/${project.id}/references/generate${force}`, { method: "POST" });
+                    const params = new URLSearchParams({ image_provider: imageProviderSelect.value });
+                    if (alreadyGenerated) params.set("force_regenerate", "true");
+                    await api(`/api/projects/${project.id}/references/generate?${params.toString()}`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
                     btn.disabled = false;
@@ -614,8 +615,9 @@ async function renderImagesView(panel, project, stages) {
                 btn.disabled = true;
                 try {
                     await saveImageProvider();
-                    const force = alreadyGenerated ? "?force_regenerate=true" : "";
-                    await api(`/api/projects/${project.id}/images/generate${force}`, { method: "POST" });
+                    const params = new URLSearchParams({ image_provider: imageProviderSelect.value });
+                    if (alreadyGenerated) params.set("force_regenerate", "true");
+                    await api(`/api/projects/${project.id}/images/generate?${params.toString()}`, { method: "POST" });
                     await loadProjects();
                 } catch (error) {
                     btn.disabled = false;
