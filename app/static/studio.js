@@ -590,7 +590,7 @@ async function renderImagesView(panel, project, stages) {
 async function renderProviderSettings(panel, project) {
     const intro = document.createElement("p");
     intro.className = "message";
-    intro.textContent = "Enter the API endpoint, API key and exported ComfyUI API workflow for each provider. Credentials are encrypted in the project database. These settings are saved here for configuration; they do not change the current image or audio generation pipeline.";
+    intro.textContent = "Choose the active image and audio providers. Gemini and Voicebox remain available; kImage and kVoice use the hosted Kaggle APIs configured below. Credentials are encrypted in the project database.";
     panel.appendChild(intro);
     let settings;
     try {
@@ -599,6 +599,45 @@ async function renderProviderSettings(panel, project) {
         setMessage(panel, error.message);
         return;
     }
+
+    const activeProviders = document.createElement("section");
+    activeProviders.className = "panel";
+    activeProviders.style.marginBottom = "20px";
+    const activeHeading = document.createElement("h3");
+    activeHeading.textContent = "Production provider selection";
+    activeProviders.appendChild(activeHeading);
+    const makeProviderSelect = (labelText, name, choices, selected) => {
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        const select = document.createElement("select");
+        select.name = name;
+        for (const [value, caption] of choices) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = caption;
+            option.selected = (selected || choices[0][0]) === value;
+            select.appendChild(option);
+        }
+        label.appendChild(select);
+        activeProviders.appendChild(label);
+        return select;
+    };
+    const imageChoice = makeProviderSelect("Image generation", "image_provider", [["gemini","Gemini API"],["kimage","kImage (hosted ComfyUI)"]], settings.image_provider || "gemini");
+    const audioChoice = makeProviderSelect("Audio generation", "audio_provider", [["voicebox","Voicebox (local)"],["kvoice","kVoice (hosted API)"]], settings.audio_provider || "voicebox");
+    const saveChoices = createButton("Save provider selection", async button => {
+        button.disabled = true;
+        try {
+            await api(`/api/projects/${project.id}/provider-settings`, {
+                method: "PUT", headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({image_provider:imageChoice.value,audio_provider:audioChoice.value})
+            });
+            setMessage(activeProviders, "Production providers saved.");
+        } catch (error) { setMessage(activeProviders, error.message); }
+        finally { button.disabled = false; }
+    });
+    saveChoices.className = "secondary";
+    activeProviders.appendChild(saveChoices);
+    panel.appendChild(activeProviders);
 
     for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"]]) {
         const saved = settings[key] || {};
@@ -632,10 +671,12 @@ async function renderProviderSettings(panel, project) {
         form.appendChild(keyLabel);
 
         const workflowLabel = document.createElement("label");
-        workflowLabel.textContent = "ComfyUI workflow JSON (Workflow → Export → API)";
+        workflowLabel.textContent = key === "kimage" ? "ComfyUI workflow JSON — mandirImageKAPI.json (Workflow → Export → API)" : "kVoice settings (workflow JSON not required)";
         const workflow = document.createElement("textarea");
         workflow.name = "workflow_json";
         workflow.rows = 14;
+        workflow.disabled = key === "kvoice";
+        if (key === "kvoice") workflow.placeholder = "kVoice uses its /v1/tts API; no workflow JSON is needed.";
         workflow.spellcheck = false;
         workflow.placeholder = '{"1":{"class_type":"...","inputs":{}}}';
         workflow.value = saved.workflow_json || "";
@@ -909,8 +950,11 @@ async function renderAudioStage(workflow, project, audioStage) {
     panel.appendChild(providerLabel);
     providerSelect.addEventListener("change", async () => {
         try {
-            const nextProfiles = await api(`/api/projects/${project.id}/audio/voices?provider=${providerSelect.value}`);
-            setMessage(panel, `Loaded ${nextProfiles.length} voice profiles. Reload this section to reassign voices.`);
+            await api(`/api/projects/${project.id}/provider-settings`, {
+                method: "PUT", headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({audio_provider: providerSelect.value})
+            });
+            selectProject(project.id, "audio");
         } catch (error) {
             setMessage(panel, error.message);
         }
