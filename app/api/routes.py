@@ -24,7 +24,7 @@ from app.services.gemini import GeminiService
 from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider
-from app.services.kaggle_workers import register_worker, list_workers, worker_count
+from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
 from app.services.video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
@@ -45,6 +45,83 @@ from app.services.audio_production import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+@router.get("/projects/{project_id}/provider-settings")
+def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except json.JSONDecodeError:
+        saved = {}
+    result = {}
+    for provider in ("kimage", "kvoice"):
+        item = saved.get(provider) or {}
+        result[provider] = {
+            "api_url": item.get("api_url", ""),
+            "workflow_json": item.get("workflow_json", ""),
+            "api_key_configured": bool(item.get("encrypted_api_key")),
+        }
+    return result
+
+
+@router.put("/projects/{project_id}/provider-settings")
+async def save_provider_settings(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Settings must be a JSON object.")
+    try:
+        saved = json.loads(project.provider_config_json or "{}")
+    except json.JSONDecodeError:
+        saved = {}
+    for provider in ("kimage", "kvoice"):
+        incoming = payload.get(provider)
+        if incoming is None:
+            continue
+        if not isinstance(incoming, dict):
+            raise HTTPException(status_code=400, detail=f"{provider} settings must be an object.")
+        current = saved.get(provider) or {}
+        url = str(incoming.get("api_url", current.get("api_url", ""))).strip().rstrip("/")
+        workflow = incoming.get("workflow_json", current.get("workflow_json", ""))
+        api_key = str(incoming.get("api_key") or "").strip()
+        if url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+                raise HTTPException(status_code=400, detail=f"Enter a valid {provider} API URL without embedded credentials.")
+            if parsed.scheme == "http" and parsed.hostname.lower() not in {"localhost", "127.0.0.1", "::1"}:
+                raise HTTPException(status_code=400, detail="Use HTTPS for remote API servers.")
+        if workflow:
+            try:
+                decoded = json.loads(workflow) if isinstance(workflow, str) else workflow
+                if not isinstance(decoded, dict):
+                    raise ValueError()
+                workflow = json.dumps(decoded, ensure_ascii=False, indent=2)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{provider} workflow must be valid JSON object.")
+        elif workflow == "":
+            workflow = ""
+        if api_key:
+            try:
+                encrypted = encrypt_api_key(api_key)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+        else:
+            encrypted = current.get("encrypted_api_key", "")
+        saved[provider] = {
+            "api_url": url,
+            "workflow_json": workflow,
+            "encrypted_api_key": encrypted,
+        }
+    project.provider_config_json = json.dumps(saved, ensure_ascii=False)
+    db.commit()
+    return {"ok": True, "message": "Provider settings saved.", **{
+        key: {"api_url": saved.get(key, {}).get("api_url", ""),
+              "workflow_json": saved.get(key, {}).get("workflow_json", ""),
+              "api_key_configured": bool(saved.get(key, {}).get("encrypted_api_key"))}
+        for key in ("kimage", "kvoice")
+    }}
+
 
 @router.get("/kaggle/workers")
 def get_kaggle_workers():
