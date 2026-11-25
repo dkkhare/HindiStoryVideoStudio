@@ -102,6 +102,15 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
     api_key = str(payload.get("api_key") or "").strip()
     if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini"}:
         raise HTTPException(status_code=400, detail="Choose a supported image or audio provider to test.")
+    if provider == "gemini":
+        try:
+            GeminiTTSProvider()
+            await GeminiTTSProvider.list_voices()
+            return {"ok": True, "message": "Gemini TTS is available and its voice catalogue loaded."}
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Gemini TTS is unavailable: {exc}") from exc
+    if provider == "voicebox":
+        api_url = (api_url or settings.voicebox_base_url).rstrip("/")
     if not api_url:
         raise HTTPException(status_code=400, detail="Enter the server API URL first.")
     from urllib.parse import urlparse
@@ -124,13 +133,6 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
     if provider == "voicebox":
         api_url = (api_url or settings.voicebox_base_url).rstrip("/")
         check_url = f"{api_url}/health"
-    elif provider == "gemini":
-        try:
-            GeminiTTSProvider()
-            await GeminiTTSProvider.list_voices()
-            return {"ok": True, "message": "Gemini TTS is available and its voice catalogue loaded."}
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Gemini TTS is unavailable: {exc}") from exc
     else:
         check_url = (f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
     try:
