@@ -46,16 +46,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-def _project_image_generation_service(project: Project) -> ImageGenerationService:
-    """Build the shared image service from this project's saved provider choice."""
+def _project_image_generation_service(
+    project: Project,
+    requested_provider: str | None = None,
+) -> ImageGenerationService:
+    """Build the image service using the provider explicitly selected for this run."""
     try:
         saved = json.loads(project.provider_config_json or "{}")
     except (TypeError, json.JSONDecodeError):
         saved = {}
-    provider = str(saved.get("image_provider") or "gemini").strip().lower()
+    provider = str(
+        requested_provider or saved.get("image_provider") or "gemini"
+    ).strip().lower()
     if provider not in {"gemini", "kimage"}:
-        raise HTTPException(status_code=400, detail="Saved image provider must be Gemini or kImage.")
+        raise HTTPException(status_code=400, detail="Image provider must be Gemini or kImage.")
     config = _project_provider_config(project).get("kimage", {})
+    if provider == "kimage" and not (
+        config.get("api_url") and config.get("workflow_json")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="kImage is selected, but its API URL or workflow is not configured. Configure kImage in API Settings; Gemini will not be used as a fallback.",
+        )
+    logger.info("Image generation provider selected for project %s: %s", project.id, provider)
     return ImageGenerationService(image_provider=provider, kimage_config=config)
 
 
@@ -505,6 +518,7 @@ def approve_screenplay(
 async def generate_references(
     project_id: int,
     force_regenerate: bool = False,
+    image_provider: str | None = None,
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
@@ -544,7 +558,7 @@ async def generate_references(
     db.commit()
 
     try:
-        service = _project_image_generation_service(project)
+        service = _project_image_generation_service(project, image_provider)
 
         result = await service.generate_references(
             project_path=project_path,
@@ -581,6 +595,7 @@ async def generate_references(
 async def generate_scene_images(
     project_id: int,
     force_regenerate: bool = False,
+    image_provider: str | None = None,
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
@@ -627,7 +642,7 @@ async def generate_scene_images(
     db.commit()
 
     try:
-        service = _project_image_generation_service(project)
+        service = _project_image_generation_service(project, image_provider)
 
         result = await service.generate_scene_images(
             project_path=project_path,
