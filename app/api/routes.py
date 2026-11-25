@@ -686,6 +686,21 @@ def get_project_asset(
     return FileResponse(requested_file)
 
 
+@router.get("/projects/{project_id}/audio/voices")
+async def list_project_audio_voices(project_id: int, provider: str = "voicebox", db: Session = Depends(get_db)):
+    project = get_project_or_404(project_id, db)
+    if provider == "kvoice":
+        config = _project_provider_config(project)["kvoice"]
+        try:
+            return await KVoiceTTSProvider(config["api_url"], config["api_key"]).list_voices()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Could not load kVoice voices: {exc}") from exc
+    try:
+        return await VoiceboxTTSProvider().list_profiles()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load Voicebox profiles: {exc}") from exc
+
+
 @router.get("/voicebox/profiles")
 async def list_voicebox_profiles():
     """Return available local Voicebox voice profiles for the audio-stage selector."""
