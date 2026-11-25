@@ -614,7 +614,7 @@ async def generate_scene_images(
 
     try:
         provider_config = _project_provider_config(project)
-        service = ImageGenerationService(image_provider="kimage" if provider_config["kimage"]["api_url"] and provider_config["kimage"]["workflow_json"] else "gemini",
+        service = ImageGenerationService(image_provider=json.loads(project.provider_config_json or "{}").get("image_provider", "gemini"),
                                          kimage_config=provider_config["kimage"])
 
         result = await service.generate_scene_images(
