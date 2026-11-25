@@ -79,6 +79,8 @@ def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
             "workflow_json": item.get("workflow_json", ""),
             "api_key_configured": bool(item.get("encrypted_api_key")),
         }
+    result["image_provider"] = saved.get("image_provider", "gemini")
+    result["audio_provider"] = saved.get("audio_provider", "voicebox")
     return result
 
 
@@ -131,6 +133,14 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
             "workflow_json": workflow,
             "encrypted_api_key": encrypted,
         }
+    image_provider = str(payload.get("image_provider", saved.get("image_provider", "gemini"))).lower()
+    audio_provider = str(payload.get("audio_provider", saved.get("audio_provider", "voicebox"))).lower()
+    if image_provider not in {"gemini", "kimage"}:
+        raise HTTPException(status_code=400, detail="Image provider must be Gemini or kImage.")
+    if audio_provider not in {"voicebox", "kvoice"}:
+        raise HTTPException(status_code=400, detail="Audio provider must be Voicebox or kVoice.")
+    saved["image_provider"] = image_provider
+    saved["audio_provider"] = audio_provider
     project.provider_config_json = json.dumps(saved, ensure_ascii=False)
     db.commit()
     return {"ok": True, "message": "Provider settings saved.", **{
@@ -521,7 +531,7 @@ async def generate_references(
 
     try:
         provider_config = _project_provider_config(project)
-        service = ImageGenerationService(image_provider="kimage" if provider_config["kimage"]["api_url"] and provider_config["kimage"]["workflow_json"] else "gemini",
+        service = ImageGenerationService(image_provider=json.loads(project.provider_config_json or "{}").get("image_provider", "gemini"),
                                          kimage_config=provider_config["kimage"])
 
         result = await service.generate_references(
