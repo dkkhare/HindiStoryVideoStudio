@@ -7,7 +7,7 @@ from typing import Any
 
 from app.database import SessionLocal
 from app.models import ProductionStage, StageStatus
-from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider
+from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider
 
 logger = logging.getLogger(__name__)
 _TASKS: dict[int, asyncio.Task] = {}
@@ -160,6 +160,8 @@ async def _run_worker(
             provider_config.get("api_url", ""),
             provider_config.get("api_key", ""),
         )
+    elif provider_name == "gemini":
+        provider = GeminiTTSProvider()
     else:
         provider = VoiceboxTTSProvider()
     segments = manifest.get("segments") or []
@@ -218,7 +220,7 @@ async def _run_worker(
                 temporary.write_bytes(audio_bytes)
                 if not _valid_wav(temporary):
                     temporary.unlink(missing_ok=True)
-                    raise RuntimeError(f"Voicebox returned invalid WAV audio for {item['segment_id']}")
+                    raise RuntimeError(f"TTS provider returned invalid WAV audio for {item['segment_id']}")
                 temporary.replace(path)
                 item["status"] = "completed"
                 item["profile_id"] = profile_id
