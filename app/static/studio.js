@@ -679,7 +679,7 @@ async function renderProviderSettings(panel, project) {
         return select;
     };
     const imageChoice = makeProviderSelect("Image generation", "image_provider", [["gemini","Gemini API"],["kimage","kImage (hosted ComfyUI)"]], settings.image_provider || "gemini");
-    const audioChoice = makeProviderSelect("Audio generation", "audio_provider", [["voicebox","Voicebox (local)"],["kvoice","kVoice (hosted API)"]], settings.audio_provider || "voicebox");
+    const audioChoice = makeProviderSelect("Audio generation", "audio_provider", [["gemini","Gemini API (Google TTS)"],["voicebox","Voicebox (local)"],["kvoice","kVoice (hosted API)"]], settings.audio_provider || "voicebox");
     const saveChoices = createButton("Save provider selection", async button => {
         button.disabled = true;
         try {
@@ -989,7 +989,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     const providerTitle = document.createElement("span");
     providerTitle.textContent = "Audio provider";
     const providerSelect = document.createElement("select");
-    for (const [value, labelText] of [["voicebox", "Voicebox (local)"], ["kvoice", "kVoice (Kaggle API)"]]) {
+    for (const [value, labelText] of [["gemini", "Gemini API (Google TTS)"], ["voicebox", "Voicebox (local)"], ["kvoice", "kVoice (hosted API)"]]) {
         const option = document.createElement("option");
         option.value = value;
         option.textContent = labelText;
@@ -1011,7 +1011,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     });
 
     if (!available.length) {
-        setMessage(panel, `${selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
+        setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voicebox"} returned no available voice profiles.`);
         workflow.appendChild(panel);
         return;
     }
