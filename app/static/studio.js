@@ -678,7 +678,7 @@ async function renderProviderSettings(panel, project) {
         workflow.disabled = key === "kvoice";
         if (key === "kvoice") workflow.placeholder = "kVoice uses its /v1/tts API; no workflow JSON is needed.";
         workflow.spellcheck = false;
-        workflow.placeholder = '{"1":{"class_type":"...","inputs":{}}}';
+        workflow.placeholder = key === "kimage" ? "Paste the API-exported mandirImageKAPI.json contents here…" : "Not required for kVoice.";
         workflow.value = saved.workflow_json || "";
         workflowLabel.appendChild(workflow);
         form.appendChild(workflowLabel);
@@ -988,10 +988,10 @@ async function renderAudioStage(workflow, project, audioStage) {
 
         for (const profile of available) {
             const option = document.createElement("option");
-            option.value = profile.id;
+            option.value = profile.id || profile.voice_id || profile.name;
 
             option.textContent =
-                `${profile.name} · ${profile.language || "language not specified"}` +
+                `${profile.name || profile.voice_id || profile.id} · ${profile.language || profile.lang || "language not specified"}` +
                 `${profile.default_engine ? " · " + profile.default_engine : ""}`;
 
             if (
