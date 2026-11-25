@@ -1033,9 +1033,7 @@ async function renderAudioStage(workflow, project, audioStage) {
     }
 
     if (!available.length && selectedProvider !== "voicebox") {
-        setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voice Studio"} returned no available voice profiles.`);
-        workflow.appendChild(panel);
-        return;
+        setMessage(panel, `${selectedProvider === "gemini" ? "Gemini API" : selectedProvider === "kvoice" ? "kVoice" : "Voice Studio"} returned no available voice profiles. Use Check Server Availability or Refresh Voices below.`);
     }
 
     const savedAssignments = Object.fromEntries(
