@@ -338,7 +338,8 @@ async def _run_worker(project_id: int, root: Path, screenplay: dict, only_scene_
                         uploads.append(await comfy.upload(client, extra_path))
                 audio_upload = await comfy.upload(client, audio_path)
                 comfy._audio_upload_name = audio_upload["name"]
-                duration = max(1.0, float(scene.get("duration_seconds") or scene.get("duration") or _wav_duration(audio_path)))\n                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay), duration, int(__import__("os").environ.get("DEFAULT_FPS", "24")))
+                duration = max(1.0, float(scene.get("duration_seconds") or scene.get("duration") or _wav_duration(audio_path)))
+                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay), duration, int(__import__("os").environ.get("DEFAULT_FPS", "24")))
                 prompt_id = await comfy.queue(client, workflow)
                 record.update(status="running", prompt_id=prompt_id)
                 manifest["detail"] = f"Generating {scene_id} in ComfyUI (prompt {prompt_id})."
