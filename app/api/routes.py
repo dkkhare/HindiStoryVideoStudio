@@ -1163,7 +1163,7 @@ async def generate_project_video(
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
-        if video_worker_active(project_id):
+    if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
     image_stage = get_stage(project, "scene_images")
