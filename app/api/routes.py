@@ -25,7 +25,7 @@ from app.services.image_generation import ImageGenerationService
 from app.services.project_files import create_project_workspace
 from app.services.tts import VoiceboxTTSProvider, KVoiceTTSProvider, GeminiTTSProvider, VoiceStudioTTSProvider
 from app.services.kaggle_workers import register_worker, list_workers, worker_count, encrypt_api_key, decrypt_api_key
-from app.services.video_production import (
+from app.services.comfy_video_production import (
     read_manifest as read_video_manifest,
     write_manifest as write_video_manifest,
     start_video_worker,
@@ -80,7 +80,7 @@ def _project_provider_config(project: Project) -> dict:
     except (TypeError, json.JSONDecodeError):
         saved = {}
     result = {}
-    for name in ("kimage", "kvoice", "voice_studio"):
+    for name in ("kimage", "kvoice", "voice_studio", "comfy_video"):
         item = saved.get(name) or {}
         encrypted = item.get("encrypted_api_key") or ""
         key = decrypt_api_key(encrypted) if encrypted else ""
@@ -110,7 +110,7 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
         if not api_key:
             encrypted_key = provider_saved.get("encrypted_api_key") or ""
             api_key = decrypt_api_key(encrypted_key) if encrypted_key else ""
-    if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini"}:
+    if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini", "comfy_video"}:
         raise HTTPException(status_code=400, detail="Choose a supported image or audio provider to test.")
     if provider == "gemini":
         try:
@@ -144,7 +144,7 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
         api_url = (api_url or settings.voicebox_base_url).rstrip("/")
         check_url = f"{api_url}/health"
     else:
-        check_url = (f"{api_url}/system_stats" if provider == "kimage" else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
+        check_url = (f"{api_url}/system_stats" if provider in {"kimage", "comfy_video"} else f"{api_url}/v1/audio/voices" if provider == "voice_studio" else f"{api_url}/v1/voices")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0), follow_redirects=True) as client:
             response = await client.get(check_url, headers=headers)
@@ -176,7 +176,7 @@ def get_provider_settings(project_id: int, db: Session = Depends(get_db)):
     except json.JSONDecodeError:
         saved = {}
     result = {}
-    for provider in ("kimage", "kvoice", "voice_studio"):
+    for provider in ("kimage", "kvoice", "voice_studio", "comfy_video"):
         item = saved.get(provider) or {}
         result[provider] = {
             "api_url": item.get("api_url", ""),
@@ -198,7 +198,7 @@ async def save_provider_settings(project_id: int, request: Request, db: Session 
         saved = json.loads(project.provider_config_json or "{}")
     except json.JSONDecodeError:
         saved = {}
-    for provider in ("kimage", "kvoice", "voice_studio"):
+    for provider in ("kimage", "kvoice", "voice_studio", "comfy_video"):
         incoming = payload.get(provider)
         if incoming is None:
             continue
@@ -1141,14 +1141,12 @@ async def generate_project_video(
     project_id: int,
     db: Session = Depends(get_db),
 ):
-    """Queue scene-by-scene video generation on the Kaggle ComfyUI server."""
+    """Queue scene-by-scene video generation on the configured direct ComfyUI API."""
     project = get_project_or_404(project_id, db)
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
-    if worker_count() == 0:
-        raise HTTPException(status_code=503, detail="Register at least one Kaggle worker in Video Production.")
-    if video_worker_active(project_id):
+        if video_worker_active(project_id):
         raise HTTPException(status_code=409, detail="Video generation is already running.")
 
     image_stage = get_stage(project, "scene_images")
@@ -1175,7 +1173,7 @@ async def generate_project_video(
     manifest = {
         **existing,
         "version": existing.get("version", 1),
-        "provider": "kaggle_comfyui",
+        "provider": "comfyui_api",
         "status": "running",
         "detail": "Video generation queued.",
         "total": len(scenes),
@@ -1187,7 +1185,7 @@ async def generate_project_video(
 
     write_video_manifest(project_path, manifest)
     video_stage.status = StageStatus.running
-    video_stage.detail = "Scene video generation queued on Kaggle ComfyUI."
+    video_stage.detail = "Scene video generation queued on direct ComfyUI."
     db.commit()
 
     if not start_video_worker(project_id, project_path, screenplay):
@@ -1196,7 +1194,7 @@ async def generate_project_video(
     return {
         "ok": True,
         "status": "running",
-        "message": "Scene video generation started on Kaggle.",
+        "message": "Scene video generation started on direct ComfyUI.",
         "total": len(scenes),
         "completed": manifest["completed"],
     }
