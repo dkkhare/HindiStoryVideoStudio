@@ -646,7 +646,7 @@ async function renderImagesView(panel, project, stages) {
 async function renderProviderSettings(panel, project) {
     const intro = document.createElement("p");
     intro.className = "message";
-    intro.textContent = "Choose the active image and audio providers. Gemini, Voicebox, kVoice and Voice Studio are supported. Provider credentials are encrypted in the project database.";
+    intro.textContent = "Configure image, audio and direct ComfyUI video providers. The video renderer now uses ComfyUI native /upload/image, /prompt, /history and /view APIs; no Kaggle worker registration is required. API credentials are encrypted in the project database.";
     panel.appendChild(intro);
     let settings;
     try {
@@ -695,7 +695,7 @@ async function renderProviderSettings(panel, project) {
     activeProviders.appendChild(saveChoices);
     panel.appendChild(activeProviders);
 
-    for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"], ["voice_studio", "Voice Studio — OpenAI-compatible TTS"]]) {
+    for (const [key, title] of [["kimage", "kImage — Image provider"], ["kvoice", "kVoice — Audio provider"], ["voice_studio", "Voice Studio — OpenAI-compatible TTS"], ["comfy_video", "Direct ComfyUI Video — LTX 2.5 renderer"]]) {
         const saved = settings[key] || {};
         const card = document.createElement("section");
         card.className = "panel";
@@ -711,7 +711,7 @@ async function renderProviderSettings(panel, project) {
         url.type = "url";
         url.name = "api_url";
         url.required = false;
-        url.placeholder = key === "voice_studio" ? "http://127.0.0.1:3900" : "https://your-comfyui-endpoint.example";
+        url.placeholder = key === "voice_studio" ? "http://127.0.0.1:3900" : "https://your-comfyui-endpoint.trycloudflare.com";
         url.value = saved.api_url || (key === "voice_studio" ? "http://127.0.0.1:3900" : "");
         urlLabel.appendChild(url);
         form.appendChild(urlLabel);
@@ -727,14 +727,14 @@ async function renderProviderSettings(panel, project) {
         form.appendChild(keyLabel);
 
         const workflowLabel = document.createElement("label");
-        workflowLabel.textContent = key === "kimage" ? "ComfyUI workflow JSON — mandirImageKAPI.json (Workflow → Export → API)" : key === "kvoice" ? "kVoice settings (workflow JSON not required)" : "Voice Studio settings (workflow JSON not required)";
+        workflowLabel.textContent = key === "kimage" ? "ComfyUI workflow JSON — image workflow (Workflow → Export → API)" : key === "comfy_video" ? "LTX23_IA2V_DUAL_T4_multiimage_HQ.json — API-exported workflow_api.json (export with all image slots enabled)" : key === "kvoice" ? "kVoice settings (workflow JSON not required)" : "Voice Studio settings (workflow JSON not required)";
         const workflow = document.createElement("textarea");
         workflow.name = "workflow_json";
         workflow.rows = 14;
-        workflow.disabled = key !== "kimage";
-        if (key !== "kimage") workflow.placeholder = key === "kvoice" ? "kVoice uses its /v1/tts API; no workflow JSON is needed." : "Voice Studio uses /v1/audio/speech; no workflow JSON is needed.";
+        workflow.disabled = !["kimage", "comfy_video"].includes(key);
+        if (!["kimage", "comfy_video"].includes(key)) workflow.placeholder = key === "kvoice" ? "kVoice uses its /v1/tts API; no workflow JSON is needed." : "Voice Studio uses /v1/audio/speech; no workflow JSON is needed.";
         workflow.spellcheck = false;
-        workflow.placeholder = key === "kimage" ? "Paste the API-exported mandirImageKAPI.json contents here…" : "Not required for this provider.";
+        workflow.placeholder = key === "kimage" ? "Paste the API-exported image workflow JSON here…" : key === "comfy_video" ? "You can paste workflow_api.json here or choose the file below. Leave blank until you export the API workflow." : "Not required for this provider.";
         workflow.value = saved.workflow_json || "";
         workflowLabel.appendChild(workflow);
         form.appendChild(workflowLabel);
@@ -747,7 +747,7 @@ async function renderProviderSettings(panel, project) {
         const save = document.createElement("button");
         save.type = "submit";
         save.className = "secondary-button";
-        save.textContent = "Save " + (key === "voice_studio" ? "Voice Studio" : key.toUpperCase()) + " settings";
+        save.textContent = "Save " + (key === "voice_studio" ? "Voice Studio" : key === "comfy_video" ? "Direct ComfyUI Video" : key.toUpperCase()) + " settings";
         footer.append(status, save);
         form.appendChild(footer);
         form.addEventListener("submit", async event => {
