@@ -168,6 +168,14 @@ class ComfyUIClient:
             # Use the most explicit prompt-labelled input; never overwrite connected inputs.
             chosen = next((item for item in prompt_candidates if "prompt" in item[1].lower()), prompt_candidates[0])
             self._set_input(workflow, chosen[0], chosen[1], prompt)
+        for node_id, node in nodes:
+            for key, value in node["inputs"].items():
+                key_lower = key.lower()
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if "fps" in key_lower or "frame_rate" in key_lower:
+                        self._set_input(workflow, node_id, key, int(fps))
+                    elif "duration" in key_lower or "seconds" in key_lower or "length_sec" in key_lower:
+                        self._set_input(workflow, node_id, key, float(duration))
         return workflow
 
     async def queue(self, client: httpx.AsyncClient, workflow: dict) -> str:
