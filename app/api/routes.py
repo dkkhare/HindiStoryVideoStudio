@@ -92,6 +92,22 @@ def _project_provider_config(project: Project) -> dict:
     return result
 
 
+def _require_comfy_video_config(project: Project) -> None:
+    config = _project_provider_config(project).get("comfy_video", {})
+    if not config.get("api_url"):
+        raise HTTPException(status_code=400, detail="Configure the Direct ComfyUI Video API Base URL in Project API Settings.")
+    if not config.get("api_key"):
+        raise HTTPException(status_code=400, detail="Configure the Direct ComfyUI Video API key in Project API Settings.")
+    workflow = config.get("workflow_json")
+    if isinstance(workflow, str):
+        try:
+            workflow = json.loads(workflow) if workflow.strip() else {}
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="The Direct ComfyUI workflow JSON is invalid.") from exc
+    if not isinstance(workflow, dict) or not workflow:
+        raise HTTPException(status_code=400, detail="Select or paste the API-exported workflow_api.json in Project API Settings → Direct ComfyUI Video.")
+
+
 @router.post("/projects/{project_id}/provider-settings/test")
 async def test_provider_server(project_id: int, request: Request, db: Session = Depends(get_db)):
     """Check a provider endpoint before allowing its settings to be saved."""
@@ -1143,6 +1159,7 @@ async def generate_project_video(
 ):
     """Queue scene-by-scene video generation on the configured direct ComfyUI API."""
     project = get_project_or_404(project_id, db)
+    _require_comfy_video_config(project)
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="Generate and approve the screenplay first.")
@@ -1237,6 +1254,7 @@ async def regenerate_project_video_scene(
 ):
     """Regenerate exactly one scene video, leaving all other clips untouched."""
     project = get_project_or_404(project_id, db)
+    _require_comfy_video_config(project)
 
     if not project.screenplay_json:
         raise HTTPException(status_code=400, detail="The screenplay is missing.")
@@ -1394,6 +1412,7 @@ async def resume_project_video(
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(project_id, db)
+    _require_comfy_video_config(project)
 
 
     manifest = read_video_manifest(Path(project.project_path))
