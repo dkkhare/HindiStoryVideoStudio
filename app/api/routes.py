@@ -127,7 +127,7 @@ async def test_provider_server(project_id: int, request: Request, db: Session = 
             encrypted_key = provider_saved.get("encrypted_api_key") or ""
             api_key = decrypt_api_key(encrypted_key) if encrypted_key else ""
     if provider not in {"kimage", "kvoice", "voice_studio", "voicebox", "gemini", "comfy_video"}:
-        raise HTTPException(status_code=400, detail="Choose a supported image or audio provider to test.")
+        raise HTTPException(status_code=400, detail="Choose a supported image, audio or video provider to test.")
     if provider == "gemini":
         try:
             GeminiTTSProvider()
