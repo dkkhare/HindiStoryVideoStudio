@@ -136,7 +136,7 @@ class ComfyUIClient:
     def _set_input(workflow: dict, node_id: str, input_name: str, value) -> None:
         workflow[str(node_id)]["inputs"][input_name] = value
 
-    def build_workflow(self, template: dict, uploads: list[dict], prompt: str) -> dict:
+    def build_workflow(self, template: dict, uploads: list[dict], prompt: str, duration: float, fps: int) -> dict:
         workflow = copy.deepcopy(template)
         nodes = [(str(k), v) for k, v in workflow.items() if isinstance(v, dict) and isinstance(v.get("inputs"), dict)]
         image_nodes = [(nid, node) for nid, node in nodes if "loadimage" in str(node.get("class_type", "")).lower()]
@@ -330,7 +330,7 @@ async def _run_worker(project_id: int, root: Path, screenplay: dict, only_scene_
                         uploads.append(await comfy.upload(client, extra_path))
                 audio_upload = await comfy.upload(client, audio_path)
                 comfy._audio_upload_name = audio_upload["name"]
-                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay))
+                duration = max(1.0, float(scene.get("duration_seconds") or scene.get("duration") or _wav_duration(audio_path)))\n                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay), duration, int(__import__("os").environ.get("DEFAULT_FPS", "24")))
                 prompt_id = await comfy.queue(client, workflow)
                 record.update(status="running", prompt_id=prompt_id)
                 manifest["detail"] = f"Generating {scene_id} in ComfyUI (prompt {prompt_id})."
