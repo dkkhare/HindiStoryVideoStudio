@@ -1571,7 +1571,7 @@ async function renderVideoStage(workflow, project, videoStage) {
     panel.dataset.projectId = project.id;
 
     const heading = document.createElement("h4");
-    heading.textContent = "Video Production · Kaggle LTX";
+    heading.textContent = "Video Production · Direct ComfyUI API";
     panel.appendChild(heading);
 
     const [manifest, screenplayData] = await Promise.all([
