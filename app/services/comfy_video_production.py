@@ -162,7 +162,7 @@ class ComfyUIClient:
         prompt_candidates = []
         for node_id, node in nodes:
             for key, value in node["inputs"].items():
-                if isinstance(value, str) and ("prompt" in key.lower() or key.lower() in {"text", "positive"}):
+                if isinstance(value, str) and "negative" not in key.lower() and ("prompt" in key.lower() or key.lower() in {"text", "positive"}):
                     prompt_candidates.append((node_id, key))
         if prompt_candidates:
             # Use the most explicit prompt-labelled input; never overwrite connected inputs.
