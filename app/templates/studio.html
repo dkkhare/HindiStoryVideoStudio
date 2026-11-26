@@ -27,7 +27,7 @@
           </button>
           <div class="project-nav-list" id="project-nav-list"><p class="project-nav-empty">Loading projects…</p></div>
         </div>
-        <button class="nav-link" type="button" data-page-link="workers"><span class="nav-icon">◈</span><span>Render workers</span></button>
+        <button class="nav-link" type="button" data-page-link="workers"><span class="nav-icon">◈</span><span>ComfyUI setup</span></button>
       </nav>
       <div class="sidebar-note">
         <div class="sidebar-note-icon">✦</div>
@@ -65,7 +65,7 @@
           <section class="overview-shortcuts">
             <button class="shortcut-card" type="button" data-page-link="create"><span class="shortcut-icon">✎</span><strong>New story</strong><small>Start a screenplay from your idea</small></button>
             <button class="shortcut-card" type="button" data-project-shortcut="first"><span class="shortcut-icon">▤</span><strong>My projects</strong><small>Continue an existing production</small></button>
-            <button class="shortcut-card" type="button" data-page-link="workers"><span class="shortcut-icon">◈</span><strong>Render workers</strong><small>Manage your Kaggle render pool</small></button>
+            <button class="shortcut-card" type="button" data-page-link="workers"><span class="shortcut-icon">◈</span><strong>ComfyUI setup</strong><small>Configure the direct video renderer in Project API Settings</small></button>
           </section>
         </section>
 
@@ -100,24 +100,13 @@
         </section>
 
         <section class="page-view" data-page="workers" id="workers-view" hidden>
-          <div class="section-heading"><div><div class="eyebrow">RENDER INFRASTRUCTURE</div><h2>Render workers</h2><p class="section-subtitle">Manage the Kaggle machines that render your video scenes.</p></div></div>
-          <section class="panel kaggle-pool-panel" id="kaggle-worker-panel">
-            <div class="panel-heading">
-              <div class="panel-icon workers-icon">◈</div>
-              <div><h3>Global Kaggle worker pool</h3><p>Register and monitor up to five independent workers.</p></div>
-              <span class="step-tag">UP TO 5 WORKERS</span>
-            </div>
-            <div class="worker-intro"><span class="worker-intro-icon">ⓘ</span><p>Each worker has its own gateway URL and API key. Credentials are stored encrypted in the application database.</p></div>
-            <form id="kaggle-worker-form" class="worker-form">
-              <div class="form-grid form-grid-three">
-                <label>Worker name<input name="name" required placeholder="e.g. Kaggle T4 Worker 1"></label>
-                <label>Gateway URL<input name="api_url" type="url" required placeholder="https://your-worker.trycloudflare.com"></label>
-                <label>Worker API key<input name="api_key" type="password" required autocomplete="off" placeholder="Enter worker API key"></label>
-              </div>
-              <div class="worker-form-footer"><p id="kaggle-worker-message" class="message" role="status"></p><button type="submit" class="secondary-button">＋ &nbsp; Register worker</button></div>
-            </form>
-            <div id="kaggle-worker-list" class="kaggle-worker-list">Loading registered workers...</div>
+          <div class="section-heading"><div><div class="eyebrow">RENDER INFRASTRUCTURE</div><h2>Direct ComfyUI</h2><p class="section-subtitle">Video scenes are rendered through the native ComfyUI API. Kaggle worker registration is no longer required.</p></div></div>
+          <section class="panel">
+            <div class="panel-heading"><div class="panel-icon workers-icon">◈</div><div><h3>ComfyUI video endpoint</h3><p>Configure the current tunnel URL, API key and exported workflow per project.</p></div></div>
+            <div class="worker-intro"><span class="worker-intro-icon">ⓘ</span><p>Open any project → API Settings → Direct ComfyUI Video. Enter the API Base URL and key, then paste or select workflow_api.json after exporting it from ComfyUI with every optional image slot enabled. The workflow is stored in the encrypted project settings; the API key is encrypted separately.</p></div>
+            <p class="message">The renderer now uses /upload/image, /prompt, /history/{prompt_id}, /view and /interrupt. Cloudflare tunnel URLs can be updated whenever the notebook restarts.</p>
           </section>
+        </section>
         </section>
 
         <section class="page-view project-detail-view" data-page="project" id="project-detail-view" hidden>
