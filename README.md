@@ -38,10 +38,24 @@ are preserved. Resume continues from the first unfinished segment, including aft
 server restart. Changing a speaker voice invalidates only that speaker's completed
 segments so they can be regenerated with the new profile.
 
-Image and video provider workflow execution remains adapter-based.
-The ComfyUI workflow JSON must be exported in API format and node IDs mapped in
-`workflows/ltx25_i2v_api.json` before a real LTX job can run. No API keys are stored
-in the database or source code.
+Video rendering now uses the native direct ComfyUI API (not the legacy Kaggle
+`/jobs` gateway). In each project open **API Settings → Direct ComfyUI Video** and
+save the current ComfyUI API base URL, API key, and API-exported workflow JSON. The
+API key is encrypted in the project database; workflow JSON is stored with the project
+provider settings. The Cloudflare URL can be changed whenever the hosted ComfyUI
+runtime restarts.
+
+Export `LTX23_IA2V_DUAL_T4_multiimage_HQ.json` from ComfyUI using **Workflow →
+Export (API)** with all optional image slots enabled. The renderer uploads scene
+images and WAV audio through `/upload/image`, queues the API workflow through
+`/prompt`, polls `/history/{prompt_id}`, and downloads the completed video through
+`/view`. Pause/Stop interrupt the active ComfyUI prompt; Resume continues from the
+first unfinished scene. No Kaggle worker registration or `/jobs` endpoint is required.
+
+The exported graph must contain ComfyUI `LoadImage` and `LoadAudio` nodes and a
+video output node that writes an MP4-compatible file to history. Prompt, duration and
+FPS inputs are detected from common input names; unusual custom-node graphs may need
+a small node-mapping adjustment after the workflow is supplied.
 
 ## Important integration notes
 
