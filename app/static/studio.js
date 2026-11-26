@@ -738,6 +738,24 @@ async function renderProviderSettings(panel, project) {
         workflow.value = saved.workflow_json || "";
         workflowLabel.appendChild(workflow);
         form.appendChild(workflowLabel);
+        if (key === "comfy_video") {
+            const fileLabel = document.createElement("label");
+            fileLabel.textContent = "Or select workflow_api.json";
+            const fileInput = document.createElement("input");
+            fileInput.type = "file";
+            fileInput.accept = ".json,application/json";
+            fileInput.addEventListener("change", async () => {
+                const file = fileInput.files?.[0];
+                if (!file) return;
+                try {
+                    workflow.value = await file.text();
+                } catch (error) {
+                    setMessage(card, `Could not read workflow file: ${error.message}`);
+                }
+            });
+            fileLabel.appendChild(fileInput);
+            form.appendChild(fileLabel);
+        }
 
         const footer = document.createElement("div");
         footer.className = "worker-form-footer";
