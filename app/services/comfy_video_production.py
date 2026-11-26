@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.config import settings
 from app.database import SessionLocal
 from app.models import Project, ProductionStage, StageStatus
 from app.services.kaggle_workers import decrypt_api_key
@@ -196,7 +197,7 @@ class ComfyUIClient:
         return str(prompt_id)
 
     async def wait(self, client: httpx.AsyncClient, prompt_id: str, project_id: int) -> dict:
-        timeout = max(900, int(__import__("os").environ.get("COMFYUI_REQUEST_TIMEOUT_SECONDS", "2700")))
+        timeout = max(900, int(settings.comfyui_request_timeout_seconds))
         deadline = asyncio.get_running_loop().time() + timeout
         failures = 0
         while asyncio.get_running_loop().time() < deadline:
@@ -304,7 +305,7 @@ async def _run_worker(project_id: int, root: Path, screenplay: dict, only_scene_
         records = _scene_records(manifest, scenes)
         manifest["total"] = len(scenes)
         manifest["completed"] = _completed_count(root, manifest)
-        timeout = httpx.Timeout(connect=30, read=max(900, 2700), write=300, pool=30)
+        timeout = httpx.Timeout(connect=30, read=max(900, int(settings.comfyui_request_timeout_seconds)), write=300, pool=30)
         async with httpx.AsyncClient(timeout=timeout) as client:
             for index, scene in enumerate(scenes, 1):
                 scene_id = str(scene.get("scene_id") or f"SCENE_{index:03d}")
@@ -339,7 +340,7 @@ async def _run_worker(project_id: int, root: Path, screenplay: dict, only_scene_
                 audio_upload = await comfy.upload(client, audio_path)
                 comfy._audio_upload_name = audio_upload["name"]
                 duration = max(1.0, float(scene.get("duration_seconds") or scene.get("duration") or _wav_duration(audio_path)))
-                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay), duration, int(__import__("os").environ.get("DEFAULT_FPS", "24")))
+                workflow = comfy.build_workflow(config["workflow"], uploads, _scene_prompt(scene, screenplay), duration, int(settings.default_fps))
                 prompt_id = await comfy.queue(client, workflow)
                 record.update(status="running", prompt_id=prompt_id)
                 manifest["detail"] = f"Generating {scene_id} in ComfyUI (prompt {prompt_id})."
